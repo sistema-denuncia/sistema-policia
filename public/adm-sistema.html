@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cadastro com Validação</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #06101b;
+      --panel: #0c1a2a;
+      --panel-2: #0f2032;
+      --line: rgba(148, 163, 184, .14);
+      --line-strong: rgba(148, 163, 184, .24);
+      --text: #e5eef7;
+      --muted: #8194a7;
+      --muted-2: #5e7184;
+      --blue: #2f7cff;
+      --cyan: #3bc7ff;
+      --red: #ff5a61;
+    }
+
+    body {
+      min-height: 100vh;
+      padding: 24px;
+      display: grid;
+      place-items: center;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 0%, rgba(47,124,255,.10), transparent 30%),
+        radial-gradient(circle at 88% 100%, rgba(59,199,255,.07), transparent 28%),
+        var(--bg);
+      font-family: Inter, "Segoe UI", sans-serif;
+    }
+
+    .card-cadastro {
+      position: relative;
+      width: min(100%, 420px);
+      padding: 38px 34px 34px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(12,26,42,.98), rgba(8,20,32,.98));
+      box-shadow: 0 24px 70px rgba(0,0,0,.34);
+    }
+
+    .card-cadastro::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--blue), var(--cyan));
+    }
+
+    .card-cadastro h2 {
+      margin-bottom: 8px;
+      color: var(--text);
+      font: 700 21px/1.25 "Segoe UI", sans-serif;
+      letter-spacing: .02em;
+      text-align: center;
+    }
+
+    .card-cadastro p {
+      margin-bottom: 26px;
+      color: var(--muted);
+      font: 10px "Consolas", monospace;
+      letter-spacing: .10em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .form-group { margin-bottom: 18px; }
+    .form-group label {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font: 600 10px "Consolas", monospace;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px 13px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      outline: none;
+      color: var(--text);
+      background: rgba(6,16,27,.72);
+      font: 13px "Segoe UI", sans-serif;
+      transition: border-color .18s ease, box-shadow .18s ease;
+    }
+
+    .form-group input::placeholder { color: var(--muted-2); }
+    .form-group input:focus {
+      border-color: rgba(59,199,255,.72);
+      box-shadow: 0 0 0 3px rgba(59,199,255,.10);
+    }
+
+    .regras-senha {
+      margin-bottom: 18px;
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-left: 2px solid var(--cyan);
+      border-radius: 8px;
+      color: var(--muted);
+      background: rgba(59,199,255,.04);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .regras-senha strong { color: #b8d3ef; font-size: 11px; }
+    .regras-senha ul { margin-top: 5px; padding-left: 0; list-style: none; }
+    .regras-senha li { margin-top: 2px; }
+    .mensagem-erro { display: none; margin-top: 5px; color: var(--red); font-size: 11px; }
+
+    .btn-cadastrar {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px;
+      border: 1px solid rgba(47,124,255,.55);
+      border-radius: 8px;
+      color: #fff;
+      background: linear-gradient(135deg, #2569d9, #2f7cff);
+      font: 700 11px "Consolas", monospace;
+      letter-spacing: .12em;
+      cursor: pointer;
+      transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+    }
+
+    .btn-cadastrar:hover { filter: brightness(1.12); box-shadow: 0 8px 22px rgba(47,124,255,.22); transform: translateY(-1px); }
+    .btn-cadastrar:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+    @media (max-width: 480px) {
+      body { padding: 16px; }
+      .card-cadastro { padding: 32px 22px 26px; }
+      .card-cadastro h2 { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+ 
+  <div class="card-cadastro">
+    <h2>LOGIN DO SUPERVISOR</h2>
+    <p>Informe suas credenciais para continuar</p>
+ 
+    <form id="formLogin" novalidate>
+      <!-- Login -->
+      <div class="form-group">
+        <label for="login">Login: </label>
+        <input type="text" id="login" required placeholder="Digite seu usuário">
+        <span class="mensagem-erro" id="erroLogin">Por favor, informe o login.</span>
+      </div>
+ 
+      <!-- Senha -->
+      <div class="form-group">
+        <label for="senha">Senha: </label>
+        <input type="password" id="senha" required placeholder="Digite sua senha">
+        <span class="mensagem-erro" id="erroSenha">Login ou senha inválidos.</span>
+      </div>
+ 
+      <button type="submit" class="btn-cadastrar">ENTRAR</button>
+    </form>
+  </div>
+ 
+  <script>
+    const form = document.getElementById('formLogin');
+    const loginInput = document.getElementById('login');
+    const senhaInput = document.getElementById('senha');
+ 
+    const erroLogin = document.getElementById('erroLogin');
+    const erroSenha = document.getElementById('erroSenha');
+    form.addEventListener('submit', async function(event) {
+      event.preventDefault();
+      const login = loginInput.value.trim();
+      const senha = senhaInput.value;
+      const camposPreenchidos = login !== '' && senha !== '';
+ 
+      if (!camposPreenchidos) {
+        erroLogin.style.display = 'block';
+      } else {
+        erroLogin.style.display = 'none';
+      }
+ 
+      if (!camposPreenchidos) {
+        erroSenha.style.display = 'block';
+      } else {
+        erroSenha.style.display = 'none';
+      }
+
+      if (camposPreenchidos) {
+        try {
+          const resposta = await fetch('/api/auth/supervisor', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ login, senha })
+          });
+
+          if (!resposta.ok) {
+            erroSenha.textContent = 'Login ou senha inválidos.';
+            erroSenha.style.display = 'block';
+            return;
+          }
+
+          sessionStorage.setItem('supervisorAutenticado', 'true');
+          form.reset();
+          window.location.href = 'cadastrar-agente.html';
+        } catch (erro) {
+          erroSenha.textContent = 'Não foi possível conectar ao servidor.';
+          erroSenha.style.display = 'block';
+        }
+      }
+    });
+  </script>
+ 
+</body>
+</html>

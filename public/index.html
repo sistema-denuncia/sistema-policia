@@ -3,36 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Acionamento de emergência</title>
+    <meta name="theme-color" content="#08111f">
+    <title>Central Operacional | Emergências</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 </head>
 <body>
-    <main class="container">
-        <header class="cabecalho">
-            <span class="sinalizador" aria-hidden="true"></span>
-            <p class="eyebrow">CANAL PRIORITÁRIO</p>
-            <h1>Acionamento de emergência</h1>
-            <p class="subtitulo">Central de resposta conectada</p>
+    <div class="app-shell">
+        <header class="topbar">
+            <div class="brand-block">
+                <div class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M12 3 4.8 6v5.6c0 4.8 3 7.9 7.2 9.4 4.2-1.5 7.2-4.6 7.2-9.4V6L12 3Z" stroke="currentColor" stroke-width="1.7"/>
+                        <path d="m9 12 2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="eyebrow">SISTEMA DE ATENDIMENTO</div>
+                    <h1>Central Operacional</h1>
+                </div>
+            </div>
+
+            <div class="topbar-right">
+                <div class="system-clock">
+                    <span class="muted-label">HORÁRIO LOCAL</span>
+                    <strong id="relogio">--:--:--</strong>
+                </div>
+                <a class="admin-access" href="adm-sistema.html">LOGIN SUPERVISOR</a>
+                <div class="connection-pill" id="statusConexao">
+                    <span class="status-dot online"></span>
+                    <span>ONLINE</span>
+                </div>
+            </div>
         </header>
 
-        <section class="painel-acionamento" aria-label="Acionador de emergência">
-            <button id="btnEmergencia" type="button" aria-label="Toque para enviar um alerta de emergência" aria-describedby="instrucao status">
-                <span class="icone-alerta" aria-hidden="true">!</span>
-                <span class="texto-botao">TOQUE PARA ALERTAR</span>
-            </button>
-            <p id="instrucao" class="instrucao">Um toque envia o alerta imediatamente</p>
-        </section>
+        <main class="workspace">
+            <section class="page-heading">
+                <div>
+                    <span class="section-code">OPS / EMERGENCIAS</span>
+                    <h2>Monitoramento de ocorrências</h2>
+                    <p>Acompanhe os acionamentos recebidos em tempo real e atualize o status operacional.</p>
+                </div>
+                <div class="live-chip"><span class="pulse"></span> FLUXO EM TEMPO REAL</div>
+            </section>
 
-        <div class="status-box" aria-live="polite">
-            <span class="status-ponto" aria-hidden="true"></span>
-            <p id="status" role="status">Pronto para receber um acionamento</p>
+            <section class="metric-grid" aria-label="Indicadores do sistema">
+                <article class="metric-card critical">
+                    <div class="metric-top"><span>OCORRÊNCIAS ATIVAS</span><span class="metric-icon">!</span></div>
+                    <strong id="metricAtivos">0</strong>
+                    <small>aguardando atendimento</small>
+                </article>
+                <article class="metric-card warning">
+                    <div class="metric-top"><span>EM ATENDIMENTO</span><span class="metric-icon">◌</span></div>
+                    <strong id="metricAtendimento">0</strong>
+                    <small>operações em andamento</small>
+                </article>
+                <article class="metric-card success">
+                    <div class="metric-top"><span>RESOLVIDAS</span><span class="metric-icon">✓</span></div>
+                    <strong id="metricResolvidas">0</strong>
+                    <small>ocorrências encerradas</small>
+                </article>
+                <article class="metric-card info">
+                    <div class="metric-top"><span>CLIENTES CONECTADOS</span><span class="metric-icon">◉</span></div>
+                    <strong id="usuariosConectados">0</strong>
+                    <small>conexões no painel</small>
+                </article>
+            </section>
+
+            <section class="control-bar">
+                <div class="filter-group" role="tablist" aria-label="Filtrar ocorrências">
+                    <button class="filtro-btn active" data-filtro="ATIVO">Ativas <span id="badgeAtivos">0</span></button>
+                    <button class="filtro-btn" data-filtro="EM_ATENDIMENTO">Em atendimento <span id="badgeAtendimento">0</span></button>
+                    <button class="filtro-btn" data-filtro="RESOLVIDO">Resolvidas <span id="badgeResolvidas">0</span></button>
+                    <button class="filtro-btn" data-filtro="TODOS">Todas <span id="totalAlertas">0</span></button>
+                </div>
+                <div class="stream-status"><span class="status-dot online"></span><span>Socket.IO ativo</span><span class="separator">•</span><span id="ultimaAtualizacao">sem atualizações</span></div>
+            </section>
+
+            <section class="alertas-container">
+                <div class="panel-header">
+                    <div>
+                        <span class="panel-kicker">INBOX OPERACIONAL</span>
+                        <h3>Ocorrências recentes</h3>
+                    </div>
+                    <div class="legend">
+                        <span><i class="legend-dot red"></i> Crítica</span>
+                        <span><i class="legend-dot yellow"></i> Atendimento</span>
+                        <span><i class="legend-dot green"></i> Resolvida</span>
+                    </div>
+                </div>
+                <div id="alertasList" class="alertas-list">
+                    <div class="empty-state">
+                        <div class="empty-icon">—</div>
+                        <strong>Nenhuma ocorrência na fila</strong>
+                        <span>Quando um novo acionamento chegar, ele aparecerá aqui automaticamente.</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="modalAlerta" class="modal hidden" aria-hidden="true">
+        <div class="modal-content">
+            <button class="modal-close" aria-label="Fechar detalhes">×</button>
+            <div id="modalBody" class="modal-body"></div>
         </div>
-
-        <footer class="rodape">
-            <span class="cadeado" aria-hidden="true">●</span>
-            <span>Seu alerta será encaminhado imediatamente</span>
-        </footer>
-    </main>
+    </div>
 
     <script src="client.js"></script>
 </body>
