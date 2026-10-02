@@ -1,7 +1,7 @@
 {
   "name": "sistema-policia-backend",
   "version": "1.1.0",
-  "description": "Backend e painel policial para receber e gerenciar alertas de emergência com SQLite",
+  "description": "Backend e painel policial para receber e gerenciar alertas de emergência com MySQL",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,9 +12,8 @@
     "electron": "^41.7.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.2.0",
-    "socket.io": "^4.6.0",
-    "sqlite3": "^5.1.7",
-    "uuid": "^9.0.0"
+    "mysql2": "^3.14.1",
+    "socket.io": "^4.6.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

@@ -4,8 +4,9 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const socketIo = require('socket.io');
-const { databaseFile, inicializarBanco, testarConexao, all, fecharBanco } = require('./db');
+const { databaseConfig, testarConexao, all, fecharBanco } = require('./db');
 const emergenciasRoute = require('./routes/emergencias');
+const usuariosRoute = require('./routes/usuarios');
 
 const app = express();
 const server = http.createServer(app);
@@ -36,16 +37,19 @@ app.post('/api/auth/supervisor', (req, res) => {
   res.json({ sucesso: true });
 });
 
-app.use('/api/emergencia', (req, res, next) => {
-  if (req.method !== 'POST') return next();
-
+function validarApiKey(req, res, next) {
   const chave = req.get('X-API-Key');
   if (!chave || chave !== API_KEY) {
     return res.status(401).json({ sucesso: false, mensagem: 'Chave de API inválida.' });
   }
   next();
-});
+}
 
+app.use('/api/usuarios', validarApiKey, usuariosRoute);
+app.use('/api/emergencia', (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  validarApiKey(req, res, next);
+});
 app.use('/api/emergencia', emergenciasRoute);
 
 app.get('/api/saude', async (req, res) => {
@@ -55,8 +59,9 @@ app.get('/api/saude', async (req, res) => {
       sucesso: true,
       servidor: 'online',
       banco: 'online',
-      bancoTipo: 'SQLite',
-      arquivoBanco: databaseFile,
+      bancoTipo: 'MySQL',
+      bancoServidor: `${databaseConfig.host}:${databaseConfig.port}`,
+      bancoNome: databaseConfig.database,
     });
   } catch (err) {
     res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline' });
@@ -75,20 +80,34 @@ app.use((err, req, res, next) => {
 io.on('connection', async (socket) => {
   try {
     const rows = await all(
-      'SELECT * FROM alertas_policia ORDER BY criado_em DESC LIMIT 100'
+      `SELECT d.*,
+              l.latitude AS localizacao_latitude,
+              l.longitude AS localizacao_longitude,
+              l.acuracia_metros AS localizacao_acuracia_metros
+       FROM denuncias d
+       LEFT JOIN localizacoes l ON l.id = (
+         SELECT l2.id
+         FROM localizacoes l2
+         WHERE l2.denuncia_id = d.id
+         ORDER BY l2.registrado_em DESC, l2.id DESC
+         LIMIT 1
+       )
+       ORDER BY d.criado_em DESC
+       LIMIT 100`
     );
 
     const alertas = rows.map((row) => ({
       id: row.id,
       protocolo: row.protocolo,
-      clienteId: row.cliente_id,
+      clienteId: String(row.usuario_id),
       tipo: row.tipo,
       status: row.status,
       prioridade: row.prioridade,
       quantidadeAcionamentos: row.quantidade_acionamentos || 1,
-      localizacao: row.latitude === null && row.longitude === null ? null : {
-        latitude: row.latitude,
-        longitude: row.longitude,
+      localizacao: row.localizacao_latitude === null ? null : {
+        latitude: row.localizacao_latitude,
+        longitude: row.localizacao_longitude,
+        acuraciaMetros: row.localizacao_acuracia_metros,
       },
       dispositivo: row.dispositivo,
       ipOrigem: row.ip_origem,
@@ -113,11 +132,10 @@ io.on('connection', async (socket) => {
 
 async function iniciar() {
   try {
-    await inicializarBanco();
     await testarConexao();
 
-    console.log('SQLite conectado com sucesso.');
-    console.log(`Banco: ${databaseFile}`);
+    console.log('MySQL conectado com sucesso.');
+    console.log(`Banco: ${databaseConfig.host}:${databaseConfig.port}/${databaseConfig.database}`);
 
     server.listen(PORT, () => {
       console.log(`Sistema policial disponível em http://localhost:${PORT}`);
