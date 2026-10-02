@@ -66,6 +66,18 @@ async function inicializarBanco() {
     )
   `);
 
+  await run(`
+    CREATE TABLE IF NOT EXISTS usuarios_sistema (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL,
+      usuario TEXT NOT NULL COLLATE NOCASE UNIQUE,
+      cargo TEXT NOT NULL CHECK (cargo IN ('ADMINISTRADOR', 'AGENTE')),
+      senha_hash TEXT NOT NULL,
+      senha_salt TEXT NOT NULL,
+      criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   const colunas = await all('PRAGMA table_info(alertas_policia)');
   if (!colunas.some((coluna) => coluna.name === 'quantidade_acionamentos')) {
     await run(`ALTER TABLE alertas_policia

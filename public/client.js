@@ -1,5 +1,11 @@
 const socket = io();
 
+socket.on('connect_error', error => {
+    if (error.message === 'Autenticação necessária.') {
+        window.location.replace('primeira-tela-login.html');
+    }
+});
+
 let alertas = [];
 let filtroAtual = 'ATIVO';
 let mapaLocalizacao = null;
