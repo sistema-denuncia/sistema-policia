@@ -32,13 +32,3 @@ CREATE INDEX IF NOT EXISTS idx_alertas_tipo_criado
 
 CREATE INDEX IF NOT EXISTS idx_alertas_criado
   ON alertas_policia (criado_em DESC);
-
-CREATE TABLE IF NOT EXISTS usuarios_sistema (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  nome TEXT NOT NULL,
-  usuario TEXT NOT NULL COLLATE NOCASE UNIQUE,
-  cargo TEXT NOT NULL CHECK (cargo IN ('ADMINISTRADOR', 'AGENTE')),
-  senha_hash TEXT NOT NULL,
-  senha_salt TEXT NOT NULL,
-  criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);

@@ -75,7 +75,16 @@ function requireAdmin(req, res, next) {
 }
 
 function usuarioPublico(row) {
-  return { id: row.id, nome: row.nome, usuario: row.usuario, cargo: row.cargo };
+  return {
+    id: row.id,
+    nome: row.nome,
+    usuario: row.usuario,
+    cargo: row.cargo === 'atendente' ? 'AGENTE' : 'ADMINISTRADOR',
+  };
+}
+
+function cargoAtendente(cargo) {
+  return cargo === 'AGENTE' ? 'atendente' : 'administrador';
 }
 
 io.use((socket, next) => {
@@ -107,7 +116,7 @@ app.post('/api/auth/login', async (req, res, next) => {
 
   try {
     const row = await get(
-      'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM usuarios_sistema WHERE usuario = ? COLLATE NOCASE',
+      'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM atendentes WHERE usuario = ? COLLATE NOCASE AND ativo = 1',
       [usuarioLogin]
     );
     if (!row) return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
@@ -117,7 +126,7 @@ app.post('/api/auth/login', async (req, res, next) => {
     if (hashSalvo.length !== hash.length || !crypto.timingSafeEqual(hash, hashSalvo)) {
       return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
     }
-    if (row.cargo !== cargoEsperado) {
+    if (usuarioPublico(row).cargo !== cargoEsperado) {
       return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
     }
 
@@ -142,9 +151,10 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const usuarios = await all(
-      'SELECT id, nome, usuario, cargo, criado_em FROM usuarios_sistema ORDER BY nome COLLATE NOCASE'
+    const atendentes = await all(
+      'SELECT id, nome, usuario, cargo, criado_em FROM atendentes ORDER BY nome COLLATE NOCASE'
     );
+    const usuarios = atendentes.map(usuarioPublico);
     res.json({ sucesso: true, usuarios });
   } catch (err) {
     next(err);
@@ -174,8 +184,8 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
     const result = await run(
-      'INSERT INTO usuarios_sistema (nome, usuario, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?)',
-      [nome, usuario, cargo, hash.toString('hex'), salt]
+      'INSERT INTO atendentes (nome, usuario, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?)',
+      [nome, usuario, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
     res.status(201).json({ sucesso: true, usuario: { id: result.lastID, nome, usuario, cargo } });
   } catch (err) {

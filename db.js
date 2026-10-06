@@ -67,16 +67,32 @@ async function inicializarBanco() {
   `);
 
   await run(`
-    CREATE TABLE IF NOT EXISTS usuarios_sistema (
+    CREATE TABLE IF NOT EXISTS atendentes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
       usuario TEXT NOT NULL COLLATE NOCASE UNIQUE,
-      cargo TEXT NOT NULL CHECK (cargo IN ('ADMINISTRADOR', 'AGENTE')),
       senha_hash TEXT NOT NULL,
       senha_salt TEXT NOT NULL,
+      cargo TEXT NOT NULL DEFAULT 'atendente'
+        CHECK (cargo IN ('atendente', 'supervisor', 'administrador')),
+      ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
       criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  const tabelaAntiga = await get(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'usuarios_sistema'"
+  );
+  if (tabelaAntiga) {
+    await run(`
+      INSERT INTO atendentes (nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em)
+      SELECT nome, usuario, senha_hash, senha_salt,
+        CASE cargo WHEN 'AGENTE' THEN 'atendente' ELSE 'administrador' END,
+        1, criado_em
+      FROM usuarios_sistema
+    `);
+    await run('DROP TABLE usuarios_sistema');
+  }
 
   const colunas = await all('PRAGMA table_info(alertas_policia)');
   if (!colunas.some((coluna) => coluna.name === 'quantidade_acionamentos')) {
