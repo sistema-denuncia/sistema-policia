@@ -128,7 +128,7 @@ function renderizarAlertas() {
 }
 
 function abrirDetalhes(id) {
-    const alerta = alertas.find(a => a.id === id);
+    const alerta = alertas.find(a => String(a.id) === String(id));
     if (!alerta) return;
 
     const localizacao = alerta.localizacao;
@@ -187,7 +187,7 @@ function abrirDetalhes(id) {
 }
 
 async function atualizarStatus(id, novoStatus) {
-    const alerta = alertas.find(a => a.id === id);
+    const alerta = alertas.find(a => String(a.id) === String(id));
     if (!alerta) return;
 
     try {

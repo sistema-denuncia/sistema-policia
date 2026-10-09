@@ -7,13 +7,6 @@ const { get, run } = require('../db');
 const scrypt = promisify(crypto.scrypt);
 const router = express.Router();
 
-const cadastroLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -47,7 +40,7 @@ function dataValida(data) {
     && valor <= new Date();
 }
 
-router.post('/', cadastroLimiter, async (req, res, next) => {
+router.post('/', async (req, res, next) => {
   const { nome, cpf, dataNascimento, email, senha } = req.body || {};
   const nomeFinal = typeof nome === 'string' ? nome.trim() : '';
   const cpfFinal = typeof cpf === 'string' ? cpf.replace(/\D/g, '') : '';
