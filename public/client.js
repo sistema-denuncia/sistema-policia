@@ -59,6 +59,22 @@ function atualizarRelogio() {
     $('relogio').textContent = new Date().toLocaleTimeString('pt-BR');
 }
 
+async function carregarUsuarioLogado() {
+    try {
+        const resposta = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        if (!resposta.ok) return;
+
+        const dados = await resposta.json();
+        const nome = dados.usuario?.nome || dados.usuario?.usuario;
+        if (!nome) return;
+
+        $('nomeUsuario').textContent = nome;
+        $('usuarioLogado').hidden = false;
+    } catch (erro) {
+        console.error('Não foi possível carregar o usuário autenticado.', erro);
+    }
+}
+
 function atualizarResumo() {
     const ativos = alertas.filter(a => a.status === 'ATIVO').length;
     const atendimento = alertas.filter(a => a.status === 'EM_ATENDIMENTO').length;
@@ -285,6 +301,7 @@ if ('Notification' in window && Notification.permission === 'default') Notificat
 
 setInterval(atualizarRelogio, 1000);
 atualizarRelogio();
+carregarUsuarioLogado();
 renderizarAlertas();
 
 console.log('Central Operacional carregada.');

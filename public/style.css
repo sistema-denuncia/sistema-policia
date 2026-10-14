@@ -70,8 +70,10 @@ button { font: inherit; }
 .topbar-right { gap: 20px; }
 .system-clock { gap: 10px; padding-right:20px; border-right:1px solid var(--line); }
 .system-clock strong { font-family:"JetBrains Mono", monospace; font-size:13px; }
-.admin-access { border:1px solid rgba(47,124,255,.35); background:rgba(47,124,255,.12); color:#a9d1ff; padding:8px 12px; border-radius:8px; font-size:10px; font-family:"JetBrains Mono",monospace; font-weight:600; letter-spacing:.08em; text-decoration:none; transition:.18s ease; }
-.admin-access:hover { background:rgba(47,124,255,.22); border-color:rgba(47,124,255,.6); color:#fff; }
+.user-session { display:grid; gap:3px; min-width:0; max-width:180px; padding:6px 10px; border-left:1px solid var(--line); }
+.user-session[hidden] { display:none; }
+.user-session span { color:var(--muted); font:600 9px "JetBrains Mono",monospace; letter-spacing:.1em; }
+.user-session strong { overflow:hidden; color:#e5eef7; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
 .connection-pill { gap:8px; border:1px solid rgba(57,217,138,.18); background:rgba(57,217,138,.07); color:#9ef3c5; padding:8px 11px; border-radius:999px; font-size:10px; font-family:"JetBrains Mono",monospace; font-weight:600; letter-spacing:.08em; }
 
 .workspace { max-width: 1480px; margin:0 auto; padding: 34px 32px 60px; }
@@ -190,6 +192,7 @@ button { font: inherit; }
 @media (max-width:760px) {
   .topbar { height:auto; min-height:74px; padding:14px 18px; gap:14px; align-items:flex-start; }
   .topbar-right { gap:10px; }
+  .user-session { max-width:140px; }
   .system-clock { display:none; }
   .workspace { padding:24px 16px 40px; }
   .page-heading { align-items:flex-start; flex-direction:column; }

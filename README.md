@@ -1,6 +1,6 @@
-# Sistema de Denúncia / Emergência — SQLite
+# Sistema de Denúncia / Emergência
 
-O backend da polícia usa **SQLite** como banco persistente. Não é necessário instalar, iniciar ou configurar MySQL.
+As ocorrências são armazenadas em SQLite. Os usuários e agentes são armazenados em MySQL na tabela `atendentes`.
 
 ## Fluxo
 
@@ -24,25 +24,30 @@ Backend da polícia (porta 3001)
 
 ## Banco
 
-O banco é criado automaticamente na primeira inicialização:
+Inicie o MySQL pelo Docker Compose na raiz do projeto:
+
+```bash
+docker compose -f database/docker-compose.yml up -d
+```
+
+O backend conecta ao MySQL em `127.0.0.1:3307`, banco `projeto_denuncia`, e usa o SQLite em:
 
 ```text
 database/emergencia.db
 ```
 
-O backend também cria a tabela e os índices automaticamente. Não é necessário executar `schema.sql` manualmente.
+O Compose cria a tabela `atendentes` a partir de `database/banco.sql`. O backend também mantém as tabelas de ocorrências no SQLite.
 
 ## Execução
 
 ### 1. Backend da polícia
 
 ```bash
-cd sistema-policia-backend
 npm install
 npm start
 ```
 
-Na primeira execução, o arquivo `database/emergencia.db` será criado automaticamente.
+Na primeira execução, o arquivo `database/emergencia.db` será criado automaticamente. Os agentes que já estavam no SQLite são copiados para `atendentes` no MySQL sem sobrescrever usuários existentes.
 
 ### 2. Backend do botão
 

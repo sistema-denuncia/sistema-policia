@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { promisify } = require('util');
 const socketIo = require('socket.io');
 const { databaseFile, inicializarBanco, testarConexao, run, get, all, fecharBanco } = require('./db');
+const { pool: mysqlPool, testarConexao: testarConexaoMySQL, fecharConexao: fecharConexaoMySQL } = require('./database/mysql');
 const emergenciasRoute = require('./routes/emergencias');
 
 const app = express();
@@ -87,6 +88,33 @@ function cargoAtendente(cargo) {
   return cargo === 'AGENTE' ? 'atendente' : 'administrador';
 }
 
+async function migrarAtendentesSqlite() {
+  const antigos = await all(
+    'SELECT nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em FROM atendentes'
+  );
+  let migrados = 0;
+
+  for (const atendente of antigos) {
+    const [resultado] = await mysqlPool.execute(
+      `INSERT IGNORE INTO atendentes
+        (nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        atendente.nome,
+        atendente.usuario,
+        atendente.senha_hash,
+        atendente.senha_salt,
+        atendente.cargo,
+        atendente.ativo,
+        atendente.criado_em,
+      ]
+    );
+    migrados += resultado.affectedRows;
+  }
+
+  return migrados;
+}
+
 io.use((socket, next) => {
   const session = getSession(getSessionToken(socket.handshake.headers.cookie));
   if (!session) return next(new Error('Autenticação necessária.'));
@@ -115,10 +143,11 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 
   try {
-    const row = await get(
-      'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM atendentes WHERE usuario = ? COLLATE NOCASE AND ativo = 1',
+    const [usuarios] = await mysqlPool.execute(
+      'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM atendentes WHERE usuario = ? AND ativo = 1 LIMIT 1',
       [usuarioLogin]
     );
+    const row = usuarios[0];
     if (!row) return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
 
     const hash = await scrypt(senha, row.senha_salt, 64);
@@ -151,10 +180,14 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const atendentes = await all(
-      'SELECT id, nome, usuario, cargo, criado_em FROM atendentes ORDER BY nome COLLATE NOCASE'
+    const [atendentes] = await mysqlPool.execute(
+      'SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome'
     );
-    const usuarios = atendentes.map(usuarioPublico);
+    const usuarios = atendentes.map((row) => ({
+      ...usuarioPublico(row),
+      ativo: Boolean(row.ativo),
+      criadoEm: row.criado_em,
+    }));
     res.json({ sucesso: true, usuarios });
   } catch (err) {
     next(err);
@@ -167,8 +200,8 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   const cargo = req.body?.cargo;
   const senha = typeof req.body?.senha === 'string' ? req.body.senha : '';
 
-  if (nome.length < 2 || nome.length > 120) {
-    return res.status(400).json({ sucesso: false, mensagem: 'Informe um nome entre 2 e 120 caracteres.' });
+  if (nome.length < 2 || nome.length > 100) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe um nome entre 2 e 100 caracteres.' });
   }
   if (usuario.length < 3 || usuario.length > 32) {
     return res.status(400).json({ sucesso: false, mensagem: 'O usuário deve ter de 3 a 32 caracteres.' });
@@ -183,13 +216,13 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   try {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
-    const result = await run(
+    const [result] = await mysqlPool.execute(
       'INSERT INTO atendentes (nome, usuario, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?)',
       [nome, usuario, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
-    res.status(201).json({ sucesso: true, usuario: { id: result.lastID, nome, usuario, cargo } });
+    res.status(201).json({ sucesso: true, usuario: { id: result.insertId, nome, usuario, cargo } });
   } catch (err) {
-    if (err.code === 'SQLITE_CONSTRAINT') {
+    if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ sucesso: false, mensagem: 'Este usuário já está cadastrado.' });
     }
     next(err);
@@ -211,16 +244,17 @@ app.use('/api/emergencia', emergenciasRoute);
 
 app.get('/api/saude', async (req, res) => {
   try {
-    await testarConexao();
+    await Promise.all([testarConexao(), testarConexaoMySQL()]);
     res.json({
       sucesso: true,
       servidor: 'online',
       banco: 'online',
-      bancoTipo: 'SQLite',
+      bancoTipo: 'SQLite + MySQL',
+      bancoAtendentes: 'online',
       arquivoBanco: databaseFile,
     });
   } catch (err) {
-    res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline' });
+    res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline', bancoAtendentes: 'offline' });
   }
 });
 
@@ -276,9 +310,12 @@ async function iniciar() {
   try {
     await inicializarBanco();
     await testarConexao();
+    await testarConexaoMySQL();
+    const migrados = await migrarAtendentesSqlite();
 
     console.log('SQLite conectado com sucesso.');
     console.log(`Banco: ${databaseFile}`);
+    console.log(`MySQL conectado; atendentes migrados: ${migrados}.`);
 
     const hostForUrl = HOST?.includes(':') ? `[${HOST}]` : HOST || 'localhost';
     server.listen({ port: PORT, ...(HOST ? { host: HOST } : {}) }, () => {
@@ -296,7 +333,7 @@ async function encerrar(signal) {
   console.log(`Encerrando (${signal})...`);
   server.close(async () => {
     try {
-      await fecharBanco();
+      await Promise.all([fecharBanco(), fecharConexaoMySQL()]);
     } finally {
       process.exit(0);
     }
