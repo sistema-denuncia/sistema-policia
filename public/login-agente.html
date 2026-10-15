@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta name="theme-color" content="#06101b">
+	<title>Login do agente</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body>
+	<main class="access-layout">
+		<section class="form-panel" aria-label="Login do agente">
+			<div class="form-wrap">
+				<section class="form-view" aria-labelledby="agent-form-title">
+					<p class="form-kicker">ACESSO DO AGENTE</p>
+					<h2 id="agent-form-title">Boas-vindas</h2>
+					<p class="form-intro">Entre com o usuário e a senha cadastrados pela administração.</p>
+
+					<form id="form-agent-login">
+						<label class="field-label" for="agent-login-usuario">Usuário</label>
+						<input id="agent-login-usuario" name="usuario" type="text" autocomplete="username" placeholder="Digite seu usuário" minlength="3" maxlength="32" required>
+
+						<label class="field-label" for="agent-login-senha">Senha</label>
+						<input id="agent-login-senha" name="senha" type="password" autocomplete="current-password" placeholder="Digite sua senha" required>
+
+						<button class="submit-button" type="submit">Fazer login <span aria-hidden="true">→</span></button>
+						<p class="form-message" id="agent-login-message" role="status" aria-live="polite"></p>
+					</form>
+
+				</section>
+			</div>
+			<footer class="form-footer"><span class="footer-lock" aria-hidden="true">●</span> Acesso protegido para agentes autorizados</footer>
+		</section>
+	</main>
+	<script src="api.js"></script>
+	<script src="script.js"></script>
+</body>
+</html>

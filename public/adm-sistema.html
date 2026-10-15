@@ -205,9 +205,8 @@
             return;
           }
 
-          sessionStorage.setItem('supervisorAutenticado', 'true');
           form.reset();
-          window.location.href = 'cadastrar-agente.html';
+          window.location.href = '/tela-adm-opcoes.html';
         } catch (erro) {
           erroSenha.textContent = 'Não foi possível conectar ao servidor.';
           erroSenha.style.display = 'block';

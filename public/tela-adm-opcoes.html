@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta name="theme-color" content="#06101b">
+	<title>Painel administrativo</title>
+	<link rel="stylesheet" href="style.css">
+</head>
+<body class="admin-body">
+	<main id="admin-app" class="admin-shell" hidden>
+		<header class="admin-header">
+			<div>
+				<p class="form-kicker">ADMINISTRAÇÃO</p>
+				<h1>Painel administrativo</h1>
+				<p class="admin-identity">Conectado como <strong id="admin-identity"></strong></p>
+			</div>
+		</header>
+
+		<nav class="admin-tabs" aria-label="Opções administrativas">
+			<button class="admin-tab" id="tab-cadastro" type="button" role="tab" aria-selected="true" aria-controls="panel-cadastro" data-admin-tab="panel-cadastro">CADASTRAR USUARIO</button>
+			<button class="admin-tab" id="tab-usuarios" type="button" role="tab" aria-selected="false" aria-controls="panel-usuarios" data-admin-tab="panel-usuarios">USUARIOS CADASTRADOS</button>
+			<button class="admin-tab admin-tab-exit" id="logout-button" type="button">SAIR</button>
+		</nav>
+
+		<section class="admin-panel" id="panel-cadastro" role="tabpanel" aria-labelledby="tab-cadastro">
+			<p class="form-kicker">NOVO ACESSO</p>
+			<h2>Cadastrar usuário</h2>
+			<p class="form-intro">Crie um acesso e defina o cargo correspondente.</p>
+
+			<form class="form-view admin-form" id="form-register">
+				<label class="field-label" for="reg-nome">Nome</label>
+				<input id="reg-nome" name="nome" type="text" autocomplete="name" placeholder="Nome completo" maxlength="120" required>
+
+				<label class="field-label" for="reg-usuario">Usuário</label>
+				<input id="reg-usuario" name="usuario" type="text" autocomplete="off" placeholder="Escolha um usuário" minlength="3" maxlength="32" required>
+
+				<label class="field-label" for="reg-cargo">Cargo</label>
+				<select id="reg-cargo" name="cargo" required>
+					<option value="" disabled selected hidden>Selecione seu cargo</option>
+					<option value="ADMINISTRADOR">ADMINISTRADOR</option>
+					<option value="AGENTE">AGENTE</option>
+				</select>
+
+				<label class="field-label" for="reg-senha">Senha</label>
+				<input id="reg-senha" name="senha" type="password" autocomplete="new-password" minlength="6" maxlength="128" aria-describedby="password-requirements" placeholder="Mínimo de 6 caracteres" required>
+				<p class="password-requirements" id="password-requirements">Use ao menos 6 caracteres, uma letra maiúscula e um caractere especial.</p>
+
+				<button class="submit-button" type="submit">Cadastrar usuário <span aria-hidden="true">→</span></button>
+				<p class="form-message" id="register-message" role="status" aria-live="polite"></p>
+			</form>
+		</section>
+
+		<section class="admin-panel" id="panel-usuarios" role="tabpanel" aria-labelledby="tab-usuarios" hidden>
+			<p class="form-kicker">CONTROLE DE ACESSO</p>
+			<h2>Usuários cadastrados</h2>
+			<p class="admin-list-message" id="users-message" role="status" aria-live="polite"></p>
+			<div class="admin-table-wrap">
+				<table class="admin-table">
+					<thead><tr><th scope="col">Nome</th><th scope="col">Usuário</th><th scope="col">Cargo</th></tr></thead>
+					<tbody id="users-list"></tbody>
+				</table>
+			</div>
+		</section>
+
+		<footer class="admin-footer"><a href="index.html">Tela de acionamento</a></footer>
+	</main>
+	<script src="api.js"></script>
+	<script src="script.js"></script>
+	<script src="admin.js"></script>
+</body>
+</html>

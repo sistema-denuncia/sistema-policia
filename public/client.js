@@ -1,5 +1,11 @@
 const socket = io();
 
+socket.on('connect_error', error => {
+    if (error.message === 'Autenticação necessária.') {
+        window.location.replace('primeira-tela-login.html');
+    }
+});
+
 let alertas = [];
 let filtroAtual = 'ATIVO';
 let mapaLocalizacao = null;
@@ -51,6 +57,22 @@ function formatarHorario(dataString) {
 
 function atualizarRelogio() {
     $('relogio').textContent = new Date().toLocaleTimeString('pt-BR');
+}
+
+async function carregarUsuarioLogado() {
+    try {
+        const resposta = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        if (!resposta.ok) return;
+
+        const dados = await resposta.json();
+        const nome = dados.usuario?.nome || dados.usuario?.usuario;
+        if (!nome) return;
+
+        $('nomeUsuario').textContent = nome;
+        $('usuarioLogado').hidden = false;
+    } catch (erro) {
+        console.error('Não foi possível carregar o usuário autenticado.', erro);
+    }
 }
 
 function atualizarResumo() {
@@ -279,6 +301,7 @@ if ('Notification' in window && Notification.permission === 'default') Notificat
 
 setInterval(atualizarRelogio, 1000);
 atualizarRelogio();
+carregarUsuarioLogado();
 renderizarAlertas();
 
 console.log('Central Operacional carregada.');

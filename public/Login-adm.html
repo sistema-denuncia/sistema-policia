@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#06101b">
+    <title>Login do administrador</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="access-layout">
+        <section class="form-panel" aria-label="Acesso do administrador">
+            <div class="form-wrap">
+                <section id="login-card" class="form-view" aria-labelledby="form-title">
+                    <p class="form-kicker">ÁREA DO ADMINISTRADOR</p>
+                    <h2 id="form-title">Boas-vindas</h2>
+                    <p class="form-intro">Entre com seus dados para continuar.</p>
+
+                    <form id="form-login">
+                        <label class="field-label" for="login-usuario">Usuário</label>
+                        <input id="login-usuario" name="usuario" type="text" autocomplete="username" placeholder="Digite seu usuário" minlength="3" maxlength="32" required>
+
+                        <div class="password-label">
+                            <label class="field-label" for="login-senha">Senha</label>
+                        </div>
+                        <input id="login-senha" name="senha" type="password" autocomplete="current-password" placeholder="Digite sua senha" required>
+
+                        <button class="submit-button" type="submit">Fazer login <span aria-hidden="true">→</span></button>
+                        <p class="form-message" id="login-message" role="status" aria-live="polite"></p>
+                    </form>
+                </section>
+            </div>
+            <footer class="form-footer"><span class="footer-lock" aria-hidden="true">●</span> Acesso protegido para administradores</footer>
+        </section>
+    </main>
+    <script src="api.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
