@@ -5,6 +5,12 @@ if (adminApp) {
     const usersMessage = document.getElementById('users-message');
     const usersList = document.getElementById('users-list');
     const registerForm = document.getElementById('form-register');
+    const historyMessage = document.getElementById('history-message');
+    const historyList = document.getElementById('history-list');
+    const historyForm = document.getElementById('history-filters');
+    const historyPeriod = document.getElementById('history-period');
+    const historyDate = document.getElementById('history-date');
+    const historyDateLabel = document.getElementById('history-date-label');
 
     function setMessage(element, text, type = 'erro') {
         element.textContent = text;
@@ -41,17 +47,78 @@ if (adminApp) {
         }
     }
 
+    function atualizarCampoData() {
+        const periodo = historyPeriod.value;
+        historyDate.type = periodo === 'dia' ? 'date' : periodo === 'mes' ? 'month' : 'number';
+        historyDateLabel.textContent = periodo === 'dia' ? 'Data' : periodo === 'mes' ? 'Mês' : 'Ano';
+        historyDate.min = periodo === 'ano' ? '2000' : '';
+        historyDate.max = periodo === 'ano' ? String(new Date().getFullYear()) : '';
+        historyDate.required = true;
+    }
+
+    async function carregarHistorico(event) {
+        event?.preventDefault();
+        const periodo = historyPeriod.value;
+        const data = historyDate.value;
+        const query = new URLSearchParams();
+        if (data) {
+            query.set('periodo', periodo);
+            query.set('data', data);
+        }
+
+        setMessage(historyMessage, 'Carregando emergências...');
+        historyList.replaceChildren();
+        try {
+            const resultado = await window.policiaApi.get(`/api/emergencia?${query.toString()}`);
+            if (!resultado.alertas.length) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 5;
+                cell.textContent = 'Nenhuma emergência encontrada neste período.';
+                row.appendChild(cell);
+                historyList.appendChild(row);
+            } else {
+                resultado.alertas.forEach((alerta) => {
+                    const row = document.createElement('tr');
+                    const timestamp = alerta.timestamp ? new Date(alerta.timestamp.replace(' ', 'T')) : null;
+                    const dataFormatada = timestamp && !Number.isNaN(timestamp.getTime())
+                        ? timestamp.toLocaleString('pt-BR')
+                        : '—';
+                    [alerta.protocolo, alerta.tipo, alerta.status, alerta.prioridade, dataFormatada].forEach((valor) => {
+                        const cell = document.createElement('td');
+                        cell.textContent = valor || '—';
+                        row.appendChild(cell);
+                    });
+                    historyList.appendChild(row);
+                });
+            }
+            setMessage(historyMessage, `${resultado.total} emergência(s) encontrada(s).`, 'sucesso');
+        } catch (error) {
+            setMessage(historyMessage, error.message);
+        }
+    }
+
     document.querySelectorAll('[data-admin-tab]').forEach((tab) => {
         tab.addEventListener('click', () => {
+            const abrirPainel = tab.getAttribute('aria-expanded') !== 'true';
             document.querySelectorAll('[data-admin-tab]').forEach((item) => {
-                item.setAttribute('aria-selected', String(item === tab));
+                item.setAttribute('aria-expanded', String(abrirPainel && item === tab));
             });
             document.querySelectorAll('.admin-panel').forEach((panel) => {
-                panel.hidden = panel.id !== tab.dataset.adminTab;
+                panel.hidden = !abrirPainel || panel.id !== tab.dataset.adminTab;
             });
-            if (tab.dataset.adminTab === 'panel-usuarios') carregarUsuarios();
+            if (abrirPainel && tab.dataset.adminTab === 'panel-usuarios') carregarUsuarios();
+            if (abrirPainel && tab.dataset.adminTab === 'panel-historico') carregarHistorico();
         });
     });
+
+    historyPeriod.addEventListener('change', atualizarCampoData);
+    historyForm.addEventListener('submit', carregarHistorico);
+    document.getElementById('history-clear').addEventListener('click', () => {
+        historyDate.value = '';
+        carregarHistorico();
+    });
+    atualizarCampoData();
 
     registerForm.addEventListener('submit', async (event) => {
         event.preventDefault();
