@@ -162,15 +162,54 @@ router.post('/', emergenciaLimiter, async (req, res) => {
 router.get('/', async (req, res, next) => {
   try {
     const status = req.query.status;
+    const { periodo, data } = req.query;
     const params = [];
     let sql = 'SELECT * FROM alertas_policia';
+    const conditions = [];
+
+    if (periodo !== undefined || data !== undefined) {
+      if (!['dia', 'mes', 'ano'].includes(periodo) || typeof data !== 'string') {
+        return res.status(400).json({ sucesso: false, mensagem: 'Informe um período e uma data válidos.' });
+      }
+
+      let inicio;
+      let fim;
+      if (periodo === 'dia' && /^\d{4}-\d{2}-\d{2}$/.test(data)) {
+        inicio = new Date(`${data}T00:00:00.000Z`);
+        if (inicio.toISOString().slice(0, 10) === data) {
+          fim = new Date(inicio);
+          fim.setUTCDate(fim.getUTCDate() + 1);
+        }
+      } else if (periodo === 'mes' && /^\d{4}-\d{2}$/.test(data)) {
+        inicio = new Date(`${data}-01T00:00:00.000Z`);
+        if (inicio.toISOString().slice(0, 7) === data) {
+          fim = new Date(inicio);
+          fim.setUTCMonth(fim.getUTCMonth() + 1);
+        }
+      } else if (periodo === 'ano' && /^\d{4}$/.test(data)) {
+        inicio = new Date(`${data}-01-01T00:00:00.000Z`);
+        if (inicio.toISOString().slice(0, 4) === data) {
+          fim = new Date(inicio);
+          fim.setUTCFullYear(fim.getUTCFullYear() + 1);
+        }
+      }
+
+      if (!inicio || !fim || Number.isNaN(inicio.getTime()) || Number.isNaN(fim.getTime())) {
+        return res.status(400).json({ sucesso: false, mensagem: 'Data inválida para o período selecionado.' });
+      }
+
+      conditions.push('criado_em >= ? AND criado_em < ?');
+      params.push(inicio.toISOString().slice(0, 19).replace('T', ' '), fim.toISOString().slice(0, 19).replace('T', ' '));
+    }
 
     if (status && STATUS_VALIDOS.includes(status)) {
-      sql += ' WHERE status = ?';
+      conditions.push('status = ?');
       params.push(status);
     }
 
-    sql += ' ORDER BY criado_em DESC LIMIT 100';
+    if (conditions.length) sql += ` WHERE ${conditions.join(' AND ')}`;
+    sql += ' ORDER BY criado_em DESC';
+    if (periodo === undefined && data === undefined) sql += ' LIMIT 100';
 
     const rows = await all(sql, params);
     res.json({ total: rows.length, alertas: rows.map(formatarAlerta) });

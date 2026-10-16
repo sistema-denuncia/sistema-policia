@@ -88,6 +88,50 @@ function cargoAtendente(cargo) {
   return cargo === 'AGENTE' ? 'atendente' : 'administrador';
 }
 
+function requireApiKey(req, res, next) {
+  if (req.get('X-API-Key') !== API_KEY) {
+    return res.status(401).json({ sucesso: false, mensagem: 'Chave de API inválida.' });
+  }
+  return next();
+}
+
+function dataValida(data) {
+  if (typeof data !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(data)) return false;
+  const parsed = new Date(`${data}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === data;
+}
+
+async function criarHashSenha(senha) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = await scrypt(senha, salt, 64);
+  return `scrypt$${salt}$${hash.toString('hex')}`;
+}
+
+async function verificarHashSenha(senha, senhaSalva) {
+  const [algoritmo, salt, hashSalvoHex] = String(senhaSalva).split('$');
+  if (algoritmo !== 'scrypt' || !/^[\da-f]{32}$/i.test(salt || '')
+    || !/^[\da-f]{128}$/i.test(hashSalvoHex || '')) {
+    return false;
+  }
+  const hashSalvo = Buffer.from(hashSalvoHex, 'hex');
+  const hashRecebido = await scrypt(senha, salt, 64);
+  return crypto.timingSafeEqual(hashSalvo, hashRecebido);
+}
+
+async function garantirTabelaUsuarios() {
+  await mysqlPool.execute(`
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      nome VARCHAR(100) NOT NULL,
+      cpf VARCHAR(14) NOT NULL UNIQUE,
+      data_nascimento DATE NOT NULL,
+      email VARCHAR(150) NOT NULL UNIQUE,
+      senha VARCHAR(255) NOT NULL,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
 async function migrarAtendentesSqlite() {
   const antigos = await all(
     'SELECT nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em FROM atendentes'
@@ -164,6 +208,72 @@ app.post('/api/auth/login', async (req, res, next) => {
     res.json({ sucesso: true, usuario });
   } catch (err) {
     next(err);
+  }
+});
+
+app.post('/api/usuarios', requireApiKey, async (req, res, next) => {
+  const nome = typeof req.body?.nome === 'string' ? req.body.nome.trim() : '';
+  const cpf = typeof req.body?.cpf === 'string' ? req.body.cpf.replace(/\D/g, '') : '';
+  const dataNascimento = req.body?.dataNascimento;
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const senha = req.body?.senha;
+
+  if (nome.length < 2 || nome.length > 100) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe um nome entre 2 e 100 caracteres.' });
+  }
+  if (!/^\d{11}$/.test(cpf)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe um CPF válido.' });
+  }
+  if (!dataValida(dataNascimento)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe uma data de nascimento válida.' });
+  }
+  if (email.length > 150 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe um e-mail válido.' });
+  }
+  if (typeof senha !== 'string' || senha.length < 6 || senha.length > 128) {
+    return res.status(400).json({ sucesso: false, mensagem: 'A senha deve ter entre 6 e 128 caracteres.' });
+  }
+
+  try {
+    const senhaHash = await criarHashSenha(senha);
+    const [result] = await mysqlPool.execute(
+      'INSERT INTO usuarios (nome, cpf, data_nascimento, email, senha) VALUES (?, ?, ?, ?, ?)',
+      [nome, cpf, dataNascimento, email, senhaHash]
+    );
+    return res.status(201).json({
+      sucesso: true,
+      usuario: { id: result.insertId, nome, email },
+    });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ sucesso: false, mensagem: 'CPF ou e-mail já cadastrado.' });
+    }
+    return next(err);
+  }
+});
+
+app.post('/api/usuarios/login', requireApiKey, async (req, res, next) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const senha = typeof req.body?.senha === 'string' ? req.body.senha : '';
+  if (!email || !senha) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe e-mail e senha.' });
+  }
+
+  try {
+    const [usuarios] = await mysqlPool.execute(
+      'SELECT id, nome, email, senha FROM usuarios WHERE email = ? LIMIT 1',
+      [email]
+    );
+    const usuario = usuarios[0];
+    if (!usuario || !(await verificarHashSenha(senha, usuario.senha))) {
+      return res.status(401).json({ sucesso: false, mensagem: 'E-mail ou senha inválidos.' });
+    }
+    return res.json({
+      sucesso: true,
+      usuario: { id: usuario.id, nome: usuario.nome, email: usuario.email },
+    });
+  } catch (err) {
+    return next(err);
   }
 });
 
@@ -309,6 +419,7 @@ io.on('connection', async (socket) => {
 async function iniciar() {
   try {
     await inicializarBanco();
+    await garantirTabelaUsuarios();
     await testarConexao();
     await testarConexaoMySQL();
     const migrados = await migrarAtendentesSqlite();
