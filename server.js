@@ -6,8 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { promisify } = require('util');
 const socketIo = require('socket.io');
-const { databaseFile, inicializarBanco, testarConexao, run, get, all, fecharBanco } = require('./db');
-const { pool: mysqlPool, testarConexao: testarConexaoMySQL, fecharConexao: fecharConexaoMySQL } = require('./database/mysql');
+const { inicializarBanco, testarConexao, run, get, all, fecharBanco, pool } = require('./db');
 const emergenciasRoute = require('./routes/emergencias');
 
 const app = express();
@@ -118,46 +117,7 @@ async function verificarHashSenha(senha, senhaSalva) {
   return crypto.timingSafeEqual(hashSalvo, hashRecebido);
 }
 
-async function garantirTabelaUsuarios() {
-  await mysqlPool.execute(`
-    CREATE TABLE IF NOT EXISTS usuarios (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      nome VARCHAR(100) NOT NULL,
-      cpf VARCHAR(14) NOT NULL UNIQUE,
-      data_nascimento DATE NOT NULL,
-      email VARCHAR(150) NOT NULL UNIQUE,
-      senha VARCHAR(255) NOT NULL,
-      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-}
 
-async function migrarAtendentesSqlite() {
-  const antigos = await all(
-    'SELECT nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em FROM atendentes'
-  );
-  let migrados = 0;
-
-  for (const atendente of antigos) {
-    const [resultado] = await mysqlPool.execute(
-      `INSERT IGNORE INTO atendentes
-        (nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        atendente.nome,
-        atendente.usuario,
-        atendente.senha_hash,
-        atendente.senha_salt,
-        atendente.cargo,
-        atendente.ativo,
-        atendente.criado_em,
-      ]
-    );
-    migrados += resultado.affectedRows;
-  }
-
-  return migrados;
-}
 
 io.use((socket, next) => {
   const session = getSession(getSessionToken(socket.handshake.headers.cookie));
@@ -187,11 +147,11 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 
   try {
-    const [usuarios] = await mysqlPool.execute(
+    const [rows] = await pool.execute(
       'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM atendentes WHERE usuario = ? AND ativo = 1 LIMIT 1',
       [usuarioLogin]
     );
-    const row = usuarios[0];
+    const row = rows[0];
     if (!row) return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
 
     const hash = await scrypt(senha, row.senha_salt, 64);
@@ -236,7 +196,7 @@ app.post('/api/usuarios', requireApiKey, async (req, res, next) => {
 
   try {
     const senhaHash = await criarHashSenha(senha);
-    const [result] = await mysqlPool.execute(
+    const [result] = await pool.execute(
       'INSERT INTO usuarios (nome, cpf, data_nascimento, email, senha) VALUES (?, ?, ?, ?, ?)',
       [nome, cpf, dataNascimento, email, senhaHash]
     );
@@ -260,7 +220,7 @@ app.post('/api/usuarios/login', requireApiKey, async (req, res, next) => {
   }
 
   try {
-    const [usuarios] = await mysqlPool.execute(
+    const [usuarios] = await pool.execute(
       'SELECT id, nome, email, senha FROM usuarios WHERE email = ? LIMIT 1',
       [email]
     );
@@ -290,9 +250,7 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const [atendentes] = await mysqlPool.execute(
-      'SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome'
-    );
+    const [atendentes] = await pool.execute('SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome');
     const usuarios = atendentes.map((row) => ({
       ...usuarioPublico(row),
       ativo: Boolean(row.ativo),
@@ -326,7 +284,7 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   try {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
-    const [result] = await mysqlPool.execute(
+    const [result] = await pool.execute(
       'INSERT INTO atendentes (nome, usuario, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?)',
       [nome, usuario, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
@@ -354,17 +312,15 @@ app.use('/api/emergencia', emergenciasRoute);
 
 app.get('/api/saude', async (req, res) => {
   try {
-    await Promise.all([testarConexao(), testarConexaoMySQL()]);
+    await testarConexao();
     res.json({
       sucesso: true,
       servidor: 'online',
       banco: 'online',
-      bancoTipo: 'SQLite + MySQL',
-      bancoAtendentes: 'online',
-      arquivoBanco: databaseFile,
+      bancoTipo: 'MySQL',
     });
   } catch (err) {
-    res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline', bancoAtendentes: 'offline' });
+    res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline' });
   }
 });
 
@@ -419,14 +375,8 @@ io.on('connection', async (socket) => {
 async function iniciar() {
   try {
     await inicializarBanco();
-    await garantirTabelaUsuarios();
-    await testarConexao();
-    await testarConexaoMySQL();
-    const migrados = await migrarAtendentesSqlite();
 
-    console.log('SQLite conectado com sucesso.');
-    console.log(`Banco: ${databaseFile}`);
-    console.log(`MySQL conectado; atendentes migrados: ${migrados}.`);
+    console.log('MySQL conectado com sucesso.');
 
     const hostForUrl = HOST?.includes(':') ? `[${HOST}]` : HOST || 'localhost';
     server.listen({ port: PORT, ...(HOST ? { host: HOST } : {}) }, () => {
@@ -444,7 +394,7 @@ async function encerrar(signal) {
   console.log(`Encerrando (${signal})...`);
   server.close(async () => {
     try {
-      await Promise.all([fecharBanco(), fecharConexaoMySQL()]);
+      await fecharBanco();
     } finally {
       process.exit(0);
     }

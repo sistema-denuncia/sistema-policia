@@ -38,6 +38,10 @@ database/emergencia.db
 
 O Compose cria a tabela `atendentes` a partir de `database/banco.sql`. O backend também mantém as tabelas de ocorrências no SQLite.
 
+Ao iniciar, o backend garante que `cliente_id` em `alertas_policia` tenha um
+índice não exclusivo. Assim, o mesmo cliente pode gerar novos alertas depois
+que um anterior for encerrado; a atualização do índice preserva os registros.
+
 ## Execução
 
 ### 1. Backend da polícia
