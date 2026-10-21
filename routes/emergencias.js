@@ -239,6 +239,7 @@ router.post('/', emergenciaLimiter, async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const status = req.query.status;
+    const { periodo, data } = req.query;
     const params = [];
     let sql = SELECT_DENUNCIA;
 

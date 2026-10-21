@@ -14,7 +14,8 @@ CREATE TABLE atendentes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(100) NOT NULL,
     usuario VARCHAR(100) NOT NULL UNIQUE,
-    senha VARCHAR(100) NOT NULL,
+    senha_hash CHAR(128) NOT NULL,
+    senha_salt CHAR(32) NOT NULL,
     cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',
     ativo BOOLEAN DEFAULT TRUE,
     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP

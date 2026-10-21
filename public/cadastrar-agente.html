@@ -141,6 +141,11 @@
       letter-spacing: .08em;
       text-align: center;
     }
+    .mensagem-sucesso[data-tipo="erro"] {
+      border-color: rgba(255,90,97,.25);
+      color: #ff9a9f;
+      background: rgba(255,90,97,.08);
+    }
 
     .agentes-panel {
       min-width: 0;
@@ -190,7 +195,7 @@
     .tabela-agentes {
       width: 100%;
       border-collapse: collapse;
-      min-width: 410px;
+      min-width: 520px;
     }
 
     .tabela-agentes th,
@@ -257,6 +262,11 @@
       <h2>BEM-VINDO SUPERVISOR</h2>
       <h3> Cadastre o agente: </h3>
       <form id="formCadastroAgente" action="#" method="POST">
+
+      <div class="form-group">
+        <label for="nome">Nome do agente:</label>
+        <input type="text" id="nome" name="nome" maxlength="100" placeholder="Digite o nome completo" required>
+      </div>
      
       <div class="form-group">
         <label for="login">Login do agente: </label>
@@ -265,6 +275,8 @@
           id="login"
           name="login"
           placeholder="Digite seu login"
+          minlength="3"
+          maxlength="32"
           required
         >
       </div>
@@ -276,6 +288,7 @@
           id="senha"
           name="senha"
           placeholder="Digite sua senha"
+          minlength="6"
           required
         >
       </div>
@@ -301,6 +314,7 @@
         <table class="tabela-agentes">
           <thead>
             <tr>
+              <th>Nome</th>
               <th>Login do agente</th>
               <th>Cadastro</th>
               <th>Status</th>
@@ -308,7 +322,7 @@
           </thead>
           <tbody id="listaAgentes">
             <tr class="tabela-vazia" id="tabelaVazia">
-              <td colspan="3">Nenhum agente cadastrado</td>
+              <td colspan="4">Nenhum agente cadastrado</td>
             </tr>
           </tbody>
         </table>
@@ -316,6 +330,7 @@
     </section>
   </div>
 
+  <script src="api.js"></script>
   <script>
     if (sessionStorage.getItem('supervisorAutenticado') !== 'true') {
       window.location.replace('adm-sistema.html');
@@ -326,46 +341,71 @@
     const listaAgentes = document.getElementById('listaAgentes');
     const tabelaVazia = document.getElementById('tabelaVazia');
     const contadorAgentes = document.getElementById('contadorAgentes');
-    const agentesSalvos = JSON.parse(localStorage.getItem('agentesCadastrados') || '[]');
+    function exibirMensagem(texto, tipo) {
+      mensagemSucesso.textContent = texto;
+      mensagemSucesso.dataset.tipo = tipo;
+      mensagemSucesso.style.display = 'block';
+    }
 
-    function atualizarTabela() {
-      tabelaVazia.hidden = agentesSalvos.length > 0;
-      contadorAgentes.textContent = `${agentesSalvos.length} agente${agentesSalvos.length === 1 ? '' : 's'}`;
+    async function atualizarTabela() {
+      const resultado = await window.policiaApi.get('/api/admin/usuarios');
+      const agentes = resultado.usuarios.filter(function(usuario) {
+        return usuario.cargo === 'AGENTE';
+      });
+      tabelaVazia.hidden = agentes.length > 0;
+      contadorAgentes.textContent = `${agentes.length} agente${agentes.length === 1 ? '' : 's'}`;
 
       listaAgentes.querySelectorAll('tr:not(#tabelaVazia)').forEach(function(linha) {
         linha.remove();
       });
 
-      agentesSalvos.forEach(function(agente) {
+      agentes.forEach(function(agente) {
         const linha = document.createElement('tr');
+        const nome = document.createElement('td');
         const login = document.createElement('td');
         const data = document.createElement('td');
         const status = document.createElement('td');
         const statusTexto = document.createElement('span');
 
+        nome.textContent = agente.nome;
         login.textContent = agente.login;
-        data.textContent = agente.data;
+        data.textContent = agente.criadoEm
+          ? new Date(agente.criadoEm).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+          : '—';
         statusTexto.className = 'status-agente';
-        statusTexto.textContent = 'ATIVO';
+        statusTexto.textContent = agente.ativo ? 'ATIVO' : 'INATIVO';
         status.appendChild(statusTexto);
-        linha.append(login, data, status);
+        linha.append(nome, login, data, status);
         listaAgentes.appendChild(linha);
       });
     }
 
-    formCadastroAgente.addEventListener('submit', function(event) {
+    formCadastroAgente.addEventListener('submit', async function(event) {
       event.preventDefault();
-      agentesSalvos.push({
-        login: document.getElementById('login').value.trim(),
-        data: new Date().toLocaleDateString('pt-BR')
-      });
-      localStorage.setItem('agentesCadastrados', JSON.stringify(agentesSalvos));
-      atualizarTabela();
-      mensagemSucesso.style.display = 'block';
-      formCadastroAgente.reset();
+      const botao = formCadastroAgente.querySelector('[type="submit"]');
+      botao.disabled = true;
+      mensagemSucesso.style.display = 'none';
+
+      try {
+        const resultado = await window.policiaApi.post('/api/admin/usuarios', {
+          nome: document.getElementById('nome').value.trim(),
+          usuario: document.getElementById('login').value.trim(),
+          senha: document.getElementById('senha').value,
+          cargo: 'AGENTE'
+        });
+        await atualizarTabela();
+        exibirMensagem(`AGENTE ${resultado.usuario.nome} CADASTRADO`, 'sucesso');
+        formCadastroAgente.reset();
+      } catch (erro) {
+        exibirMensagem(erro.message, 'erro');
+      } finally {
+        botao.disabled = false;
+      }
     });
 
-    atualizarTabela();
+    atualizarTabela().catch(function(erro) {
+      exibirMensagem(erro.message, 'erro');
+    });
   </script>
 
 </body>
