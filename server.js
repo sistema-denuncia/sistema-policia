@@ -118,19 +118,6 @@ async function verificarHashSenha(senha, senhaSalva) {
   return crypto.timingSafeEqual(hashSalvo, hashRecebido);
 }
 
-async function garantirTabelaUsuarios() {
-  await mysqlPool.execute(`
-    CREATE TABLE IF NOT EXISTS usuarios (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      nome VARCHAR(100) NOT NULL,
-      cpf VARCHAR(14) NOT NULL UNIQUE,
-      data_nascimento DATE NOT NULL,
-      email VARCHAR(150) NOT NULL UNIQUE,
-      senha VARCHAR(255) NOT NULL,
-      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-}
 
 async function garantirTabelaAtendentes() {
   await mysqlPool.execute(`
@@ -212,7 +199,7 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 
   try {
-    const [usuarios] = await mysqlPool.execute(
+    const [rows] = await pool.execute(
       'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM atendentes WHERE usuario = ? AND ativo = 1 LIMIT 1',
       [usuarioLogin]
     );
@@ -264,7 +251,7 @@ app.post('/api/usuarios', requireApiKey, async (req, res, next) => {
 
   try {
     const senhaHash = await criarHashSenha(senha);
-    const [result] = await mysqlPool.execute(
+    const [result] = await pool.execute(
       'INSERT INTO usuarios (nome, cpf, data_nascimento, email, senha) VALUES (?, ?, ?, ?, ?)',
       [nome, cpf, dataNascimento, email, senhaHash]
     );
@@ -288,7 +275,7 @@ app.post('/api/usuarios/login', requireApiKey, async (req, res, next) => {
   }
 
   try {
-    const [usuarios] = await mysqlPool.execute(
+    const [usuarios] = await pool.execute(
       'SELECT id, nome, email, senha FROM usuarios WHERE email = ? LIMIT 1',
       [email]
     );
@@ -325,9 +312,7 @@ function validarApiKey(req, res, next) {
 }
 app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const [atendentes] = await mysqlPool.execute(
-      'SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome'
-    );
+    const [atendentes] = await pool.execute('SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome');
     const usuarios = atendentes.map((row) => ({
       ...usuarioPublico(row),
       ativo: Boolean(row.ativo),
@@ -361,7 +346,7 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   try {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
-    const [result] = await mysqlPool.execute(
+    const [result] = await pool.execute(
       'INSERT INTO atendentes (nome, usuario, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?)',
       [nome, usuario, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
@@ -405,7 +390,7 @@ app.get('/api/saude', async (req, res) => {
       bancoAtendentes: 'online',
     });
   } catch (err) {
-    res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline', bancoAtendentes: 'offline' });
+    res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline' });
   }
 });
 
