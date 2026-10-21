@@ -73,6 +73,10 @@ function gerarProtocolo() {
   return `EMERG-${data}-${sufixo}`;
 }
 
+function paraMySqlDateTime(date = new Date()) {
+  return new Date(date).toISOString().slice(0, 19).replace('T', ' ');
+}
+
 router.post('/', emergenciaLimiter, async (req, res) => {
   const { clienteId, tipo, prioridade, dispositivo, localizacao } = req.body;
 
@@ -82,16 +86,19 @@ router.post('/', emergenciaLimiter, async (req, res) => {
 
   try {
     const loc = validarLocalizacao(localizacao);
+    // Só considera "existente" um alerta ainda aberto (não encerrado).
+    // Se estiver RESOLVIDO ou FALSO_ALARME, cria um novo chamado.
     const existente = await get(
-      'SELECT * FROM alertas_policia WHERE cliente_id = ? LIMIT 1',
+      `SELECT * FROM alertas_policia
+       WHERE cliente_id = ? AND status NOT IN ('RESOLVIDO', 'FALSO_ALARME')
+       LIMIT 1`,
       [clienteId]
     );
 
     if (existente) {
       await run(
         `UPDATE alertas_policia
-         SET quantidade_acionamentos = COALESCE(quantidade_acionamentos, 1) + 1,
-             atualizado_em = CURRENT_TIMESTAMP
+         SET quantidade_acionamentos = COALESCE(quantidade_acionamentos, 1) + 1
          WHERE id = ?`,
         [existente.id]
       );
@@ -244,13 +251,13 @@ router.patch('/:id/status', async (req, res, next) => {
 
   try {
     const encerradoEm = ['RESOLVIDO', 'FALSO_ALARME'].includes(status)
-      ? new Date().toISOString()
+      ? paraMySqlDateTime()
       : null;
 
     const result = await run(
       `UPDATE alertas_policia
        SET status = ?, observacoes = ?,
-           encerrado_em = ?, atualizado_em = CURRENT_TIMESTAMP
+           encerrado_em = ?
        WHERE id = ?`,
       [status, observacoes ? String(observacoes).slice(0, 5000) : null, encerradoEm, req.params.id]
     );

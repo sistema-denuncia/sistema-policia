@@ -1,129 +1,82 @@
-const fs = require('fs');
-const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
+// db.js — wrapper MySQL que expõe a mesma API que o antigo wrapper SQLite:
+//   run(sql, params)  → { lastID, changes }
+//   get(sql, params)  → row | null
+//   all(sql, params)  → row[]
+//
+// Todas as tabelas (incluindo alertas_policia) são criadas pelo banco.sql
+// carregado pelo Docker ao iniciar o container.
 
-const databaseDir = path.join(__dirname, 'database');
-const databaseFile = path.join(databaseDir, 'emergencia.db');
+const { pool, testarConexao, fecharConexao } = require('./database/mysql');
 
-fs.mkdirSync(databaseDir, { recursive: true });
-
-const db = new sqlite3.Database(databaseFile);
-
-db.configure('busyTimeout', 5000);
-
-function run(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function onRun(err) {
-      if (err) return reject(err);
-      resolve({ lastID: this.lastID, changes: this.changes });
-    });
-  });
+/**
+ * Executa uma query de escrita (INSERT / UPDATE / DELETE).
+ * Retorna { lastID, changes } para manter compatibilidade com o SQLite anterior.
+ */
+async function run(sql, params = []) {
+  const [result] = await pool.execute(sql, params);
+  return {
+    lastID: result.insertId ?? null,
+    changes: result.affectedRows ?? 0,
+  };
 }
 
-function get(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) return reject(err);
-      resolve(row || null);
-    });
-  });
+/**
+ * Retorna a primeira linha do resultado ou null.
+ */
+async function get(sql, params = []) {
+  const [rows] = await pool.execute(sql, params);
+  return rows[0] ?? null;
 }
 
-function all(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) return reject(err);
-      resolve(rows || []);
-    });
-  });
+/**
+ * Retorna todas as linhas do resultado.
+ */
+async function all(sql, params = []) {
+  const [rows] = await pool.execute(sql, params);
+  return rows;
 }
 
+/**
+ * Inicializa o banco — no SQLite criávamos as tabelas aqui,
+ * mas no MySQL elas já existem via banco.sql (docker-entrypoint-initdb.d).
+ * Mantemos a função para não quebrar a chamada em server.js.
+ */
 async function inicializarBanco() {
-  await run('PRAGMA foreign_keys = ON');
-  await run('PRAGMA journal_mode = WAL');
+  // Garante que a conexão está viva antes de continuar.
+  await testarConexao();
 
-  await run(`
-    CREATE TABLE IF NOT EXISTS alertas_policia (
-      id TEXT NOT NULL PRIMARY KEY,
-      protocolo TEXT NOT NULL UNIQUE,
-      cliente_id TEXT NOT NULL UNIQUE,
-      tipo TEXT NOT NULL DEFAULT 'EMERGENCIA',
-      status TEXT NOT NULL DEFAULT 'ATIVO'
-        CHECK (status IN ('ATIVO', 'EM_ATENDIMENTO', 'RESOLVIDO', 'FALSO_ALARME')),
-      prioridade TEXT NOT NULL DEFAULT 'ALTA'
-        CHECK (prioridade IN ('BAIXA', 'MEDIA', 'ALTA', 'CRITICA')),
-      quantidade_acionamentos INTEGER NOT NULL DEFAULT 1,
-      latitude REAL,
-      longitude REAL,
-      acuracia_metros REAL,
-      dispositivo TEXT,
-      ip_origem TEXT,
-      origem TEXT NOT NULL DEFAULT 'botao-emergencia-web',
-      observacoes TEXT,
-      criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      encerrado_em TEXT
-    )
-  `);
-
-  await run(`
-    CREATE TABLE IF NOT EXISTS atendentes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nome TEXT NOT NULL,
-      usuario TEXT NOT NULL COLLATE NOCASE UNIQUE,
-      senha_hash TEXT NOT NULL,
-      senha_salt TEXT NOT NULL,
-      cargo TEXT NOT NULL DEFAULT 'atendente'
-        CHECK (cargo IN ('atendente', 'supervisor', 'administrador')),
-      ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
-      criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  const tabelaAntiga = await get(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'usuarios_sistema'"
+  const [indexes] = await pool.query(
+    `SELECT INDEX_NAME, NON_UNIQUE, COUNT(*) AS COLUMN_COUNT,
+            MAX(CASE WHEN SEQ_IN_INDEX = 1 THEN COLUMN_NAME END) AS FIRST_COLUMN
+     FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'alertas_policia'
+     GROUP BY INDEX_NAME, NON_UNIQUE`
   );
-  if (tabelaAntiga) {
-    await run(`
-      INSERT INTO atendentes (nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em)
-      SELECT nome, usuario, senha_hash, senha_salt,
-        CASE cargo WHEN 'AGENTE' THEN 'atendente' ELSE 'administrador' END,
-        1, criado_em
-      FROM usuarios_sistema
-    `);
-    await run('DROP TABLE usuarios_sistema');
+
+  for (const index of indexes) {
+    if (Number(index.NON_UNIQUE) === 0 && Number(index.COLUMN_COUNT) === 1
+      && index.FIRST_COLUMN === 'cliente_id') {
+      const indexName = String(index.INDEX_NAME).replace(/`/g, '``');
+      await pool.query(`ALTER TABLE alertas_policia DROP INDEX \`${indexName}\``);
+    }
   }
 
-  const colunas = await all('PRAGMA table_info(alertas_policia)');
-  if (!colunas.some((coluna) => coluna.name === 'quantidade_acionamentos')) {
-    await run(`ALTER TABLE alertas_policia
-               ADD COLUMN quantidade_acionamentos INTEGER NOT NULL DEFAULT 1`);
+  const possuiIndiceCliente = indexes.some((index) => (
+    Number(index.COLUMN_COUNT) === 1 && index.FIRST_COLUMN === 'cliente_id'
+      && Number(index.NON_UNIQUE) !== 0
+  ));
+
+  if (!possuiIndiceCliente) {
+    await pool.query('CREATE INDEX idx_alertas_cliente ON alertas_policia (cliente_id)');
   }
-
-  await run(`CREATE INDEX IF NOT EXISTS idx_alertas_status_criado
-             ON alertas_policia (status, criado_em DESC)`);
-  await run(`CREATE INDEX IF NOT EXISTS idx_alertas_tipo_criado
-             ON alertas_policia (tipo, criado_em DESC)`);
-  await run(`CREATE INDEX IF NOT EXISTS idx_alertas_criado
-             ON alertas_policia (criado_em DESC)`);
-}
-
-async function testarConexao() {
-  await get('SELECT 1 AS online');
-}
-
-function fecharBanco() {
-  return new Promise((resolve, reject) => {
-    db.close((err) => (err ? reject(err) : resolve()));
-  });
 }
 
 module.exports = {
-  databaseFile,
-  inicializarBanco,
-  testarConexao,
+  pool,
   run,
   get,
   all,
-  fecharBanco,
+  inicializarBanco,
+  testarConexao,
+  fecharBanco: fecharConexao,
 };
