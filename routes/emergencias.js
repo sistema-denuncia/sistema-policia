@@ -9,7 +9,7 @@ const PRIORIDADES_VALIDAS = ['BAIXA', 'MEDIA', 'ALTA', 'CRITICA'];
 
 const emergenciaLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.EMERGENCIA_RATE_LIMIT || 30),
+  max: Number(process.env.EMERGENCIA_RATE_LIMIT || 100),
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -215,7 +215,7 @@ router.post('/', emergenciaLimiter, async (req, res, next) => {
     );
     const alerta = formatarAlerta(row);
 
-    req.app.get('io').emit(resultado.duplicado ? 'alerta-atualizado' : 'novo-alerta', alerta);
+    req.app.get('io').emit(resultado.duplicado ? 'novo-acionamento' : 'novo-alerta', alerta);
 
     return res.status(resultado.duplicado ? 200 : 201).json({
       sucesso: true,
@@ -281,9 +281,7 @@ router.patch('/:id/status', async (req, res, next) => {
   }
 
   try {
-    const encerradoEm = ['RESOLVIDO', 'FALSO_ALARME'].includes(status)
-      ? new Date().toISOString()
-      : null;
+    const encerrar = ['RESOLVIDO', 'FALSO_ALARME'].includes(status);
 
     const existente = await get(
       'SELECT id FROM denuncias WHERE id = ?',
@@ -297,9 +295,10 @@ router.patch('/:id/status', async (req, res, next) => {
     await run(
       `UPDATE denuncias
        SET status = ?, observacoes = ?,
-           encerrado_em = ?, atualizado_em = CURRENT_TIMESTAMP
+           encerrado_em = IF(?, CURRENT_TIMESTAMP, NULL),
+           atualizado_em = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [status, observacoes ? String(observacoes).slice(0, 5000) : null, encerradoEm, req.params.id]
+      [status, observacoes ? String(observacoes).slice(0, 5000) : null, encerrar, req.params.id]
     );
 
     const alerta = await get(

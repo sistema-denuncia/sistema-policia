@@ -223,16 +223,29 @@ socket.on('connect', () => { atualizarStatusConexao(true); marcarAtualizacao(); 
 socket.on('disconnect', () => { atualizarStatusConexao(false); });
 
 socket.on('carregar-alertas', dados => { alertas = Array.isArray(dados) ? dados : []; renderizarAlertas(); marcarAtualizacao(); });
+function notificarAcionamento(alerta) {
+    tocarSomAlerta();
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Novo acionamento de emergência', {
+            body: `Protocolo ${alerta.protocolo} — ${alerta.quantidadeAcionamentos} acionamento(s)`
+        });
+    }
+}
+
 socket.on('novo-alerta', alerta => {
     alertas = [alerta, ...alertas.filter(a => a.id !== alerta.id)];
     renderizarAlertas();
     marcarAtualizacao();
-    tocarSomAlerta();
-    if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('Novo acionamento de emergência', { body: `Protocolo ${alerta.protocolo}` });
-    }
+    notificarAcionamento(alerta);
     const first = document.querySelector('.alerta-card');
     if (first) first.style.animation = 'slideIn .45s ease';
+});
+
+socket.on('novo-acionamento', alerta => {
+    alertas = [alerta, ...alertas.filter(a => a.id !== alerta.id)];
+    renderizarAlertas();
+    marcarAtualizacao();
+    notificarAcionamento(alerta);
 });
 
 socket.on('alerta-atualizado', alerta => {
