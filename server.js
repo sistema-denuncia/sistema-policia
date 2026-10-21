@@ -6,11 +6,11 @@ const path = require('path');
 const crypto = require('crypto');
 const { promisify } = require('util');
 const socketIo = require('socket.io');
-const { databaseConfig, testarConexao, all, fecharBanco } = require('./db');
-const { databaseFile, inicializarBanco, testarConexao, run, get, all, fecharBanco } = require('./db');
-const { pool: mysqlPool, testarConexao: testarConexaoMySQL, fecharConexao: fecharConexaoMySQL } = require('./database/mysql');
+const { databaseConfig, inicializarBanco, testarConexao, all, fecharBanco } = require('./db');
+const { pool: mysqlPool } = require('./database/mysql');
 const emergenciasRoute = require('./routes/emergencias');
 const usuariosRoute = require('./routes/usuarios');
+const { SELECT_DENUNCIA, formatarAlerta } = require('./lib/alertas');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,8 +24,6 @@ const io = socketIo(server, {
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST;
 const API_KEY = process.env.POLICIA_API_KEY || 'desenvolvimento-local';
-const SUPERVISOR_LOGIN = process.env.SUPERVISOR_LOGIN || 'supervisor';
-const SUPERVISOR_SENHA = process.env.SUPERVISOR_SENHA || 'Supervisor@123';
 const SESSION_COOKIE = 'policia_session';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const sessions = new Map();
@@ -134,31 +132,32 @@ async function garantirTabelaUsuarios() {
   `);
 }
 
-async function migrarAtendentesSqlite() {
-  const antigos = await all(
-    'SELECT nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em FROM atendentes'
-  );
-  let migrados = 0;
+async function garantirTabelaAtendentes() {
+  await mysqlPool.execute(`
+    CREATE TABLE IF NOT EXISTS atendentes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      nome VARCHAR(100) NOT NULL,
+      usuario VARCHAR(100) NOT NULL UNIQUE,
+      senha_hash CHAR(128) NULL,
+      senha_salt CHAR(32) NULL,
+      cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',
+      ativo BOOLEAN DEFAULT TRUE,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 
-  for (const atendente of antigos) {
-    const [resultado] = await mysqlPool.execute(
-      `INSERT IGNORE INTO atendentes
-        (nome, usuario, senha_hash, senha_salt, cargo, ativo, criado_em)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        atendente.nome,
-        atendente.usuario,
-        atendente.senha_hash,
-        atendente.senha_salt,
-        atendente.cargo,
-        atendente.ativo,
-        atendente.criado_em,
-      ]
-    );
-    migrados += resultado.affectedRows;
+  const [columns] = await mysqlPool.query('SHOW COLUMNS FROM atendentes');
+  const columnNames = new Set(columns.map((column) => column.Field));
+  if (!columnNames.has('senha_hash')) {
+    await mysqlPool.query('ALTER TABLE atendentes ADD COLUMN senha_hash CHAR(128) NULL');
   }
-
-  return migrados;
+  if (!columnNames.has('senha_salt')) {
+    await mysqlPool.query('ALTER TABLE atendentes ADD COLUMN senha_salt CHAR(32) NULL');
+  }
+  const legacyPasswordColumn = columns.find((column) => column.Field === 'senha');
+  if (legacyPasswordColumn && legacyPasswordColumn.Null === 'NO') {
+    await mysqlPool.query('ALTER TABLE atendentes MODIFY COLUMN senha VARCHAR(100) NULL');
+  }
 }
 
 io.use((socket, next) => {
@@ -168,16 +167,40 @@ io.use((socket, next) => {
   next();
 });
 
-app.post('/api/auth/supervisor', (req, res) => {
-  const { login, senha } = req.body || {};
+app.post('/api/auth/supervisor', async (req, res, next) => {
+  const login = typeof req.body?.login === 'string' ? req.body.login.trim().toLowerCase() : '';
+  const senha = typeof req.body?.senha === 'string' ? req.body.senha : '';
 
-  if (login !== SUPERVISOR_LOGIN || senha !== SUPERVISOR_SENHA) {
-    return res.status(401).json({ sucesso: false, mensagem: 'Login ou senha inválidos.' });
+  if (!login || !senha) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe usuário e senha.' });
   }
 
-  const usuario = { id: 'supervisor', nome: 'Supervisor', usuario: SUPERVISOR_LOGIN, cargo: 'ADMINISTRADOR' };
-  startSession(res, usuario);
-  res.json({ sucesso: true, usuario });
+  try {
+    const [supervisores] = await mysqlPool.execute(
+      `SELECT id, nome, usuario, cargo, senha_hash, senha_salt
+       FROM atendentes
+       WHERE usuario = ? AND cargo = 'supervisor' AND ativo = 1
+       LIMIT 1`,
+      [login]
+    );
+    const row = supervisores[0];
+    if (!row || !/^[\da-f]{32}$/i.test(row.senha_salt || '')
+      || !/^[\da-f]{128}$/i.test(row.senha_hash || '')) {
+      return res.status(401).json({ sucesso: false, mensagem: 'Login ou senha inválidos.' });
+    }
+
+    const hash = await scrypt(senha, row.senha_salt, 64);
+    const hashSalvo = Buffer.from(row.senha_hash, 'hex');
+    if (hashSalvo.length !== hash.length || !crypto.timingSafeEqual(hash, hashSalvo)) {
+      return res.status(401).json({ sucesso: false, mensagem: 'Login ou senha inválidos.' });
+    }
+
+    const usuario = usuarioPublico(row);
+    startSession(res, usuario);
+    return res.json({ sucesso: true, usuario });
+  } catch (err) {
+    return next(err);
+  }
 });
 
 app.post('/api/auth/login', async (req, res, next) => {
@@ -194,7 +217,10 @@ app.post('/api/auth/login', async (req, res, next) => {
       [usuarioLogin]
     );
     const row = usuarios[0];
-    if (!row) return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
+    if (!row || !/^[\da-f]{32}$/i.test(row.senha_salt || '')
+      || !/^[\da-f]{128}$/i.test(row.senha_hash || '')) {
+      return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
+    }
 
     const hash = await scrypt(senha, row.senha_salt, 64);
     const hashSalvo = Buffer.from(row.senha_hash, 'hex');
@@ -368,7 +394,7 @@ app.use('/api/emergencia', emergenciasRoute);
 
 app.get('/api/saude', async (req, res) => {
   try {
-    await Promise.all([testarConexao(), testarConexaoMySQL()]);
+    await testarConexao();
     res.json({
       sucesso: true,
       servidor: 'online',
@@ -376,9 +402,7 @@ app.get('/api/saude', async (req, res) => {
       bancoTipo: 'MySQL',
       bancoServidor: `${databaseConfig.host}:${databaseConfig.port}`,
       bancoNome: databaseConfig.database,
-      bancoTipo: 'SQLite + MySQL',
       bancoAtendentes: 'online',
-      arquivoBanco: databaseFile,
     });
   } catch (err) {
     res.status(503).json({ sucesso: false, servidor: 'online', banco: 'offline', bancoAtendentes: 'offline' });
@@ -396,44 +420,8 @@ app.use((err, req, res, next) => {
 
 io.on('connection', async (socket) => {
   try {
-    const rows = await all(
-      `SELECT d.*,
-              l.latitude AS localizacao_latitude,
-              l.longitude AS localizacao_longitude,
-              l.acuracia_metros AS localizacao_acuracia_metros
-       FROM denuncias d
-       LEFT JOIN localizacoes l ON l.id = (
-         SELECT l2.id
-         FROM localizacoes l2
-         WHERE l2.denuncia_id = d.id
-         ORDER BY l2.registrado_em DESC, l2.id DESC
-         LIMIT 1
-       )
-       ORDER BY d.criado_em DESC
-       LIMIT 100`
-    );
-
-    const alertas = rows.map((row) => ({
-      id: row.id,
-      protocolo: row.protocolo,
-      clienteId: String(row.usuario_id),
-      tipo: row.tipo,
-      status: row.status,
-      prioridade: row.prioridade,
-      quantidadeAcionamentos: row.quantidade_acionamentos || 1,
-      localizacao: row.localizacao_latitude === null ? null : {
-        latitude: row.localizacao_latitude,
-        longitude: row.localizacao_longitude,
-        acuraciaMetros: row.localizacao_acuracia_metros,
-      },
-      dispositivo: row.dispositivo,
-      ipOrigem: row.ip_origem,
-      origem: row.origem,
-      observacoes: row.observacoes,
-      timestamp: row.criado_em,
-      atualizadoEm: row.atualizado_em,
-      encerradoEm: row.encerrado_em,
-    }));
+    const rows = await all(`${SELECT_DENUNCIA} ORDER BY d.criado_em DESC LIMIT 100`);
+    const alertas = rows.map(formatarAlerta);
 
     socket.emit('carregar-alertas', alertas);
   } catch (err) {
@@ -449,11 +437,10 @@ io.on('connection', async (socket) => {
 
 async function iniciar() {
   try {
-    await inicializarBanco();
     await garantirTabelaUsuarios();
+    await garantirTabelaAtendentes();
+    await inicializarBanco();
     await testarConexao();
-    await testarConexaoMySQL();
-    const migrados = await migrarAtendentesSqlite();
 
     console.log('MySQL conectado com sucesso.');
     console.log(`Banco: ${databaseConfig.host}:${databaseConfig.port}/${databaseConfig.database}`);
@@ -474,7 +461,7 @@ async function encerrar(signal) {
   console.log(`Encerrando (${signal})...`);
   server.close(async () => {
     try {
-      await Promise.all([fecharBanco(), fecharConexaoMySQL()]);
+      await fecharBanco();
     } finally {
       process.exit(0);
     }

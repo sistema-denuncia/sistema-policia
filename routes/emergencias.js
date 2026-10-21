@@ -1,6 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { run, get, all, transaction } = require('../db');
+const { SELECT_DENUNCIA, formatarAlerta } = require('../lib/alertas');
 
 const router = express.Router();
 
@@ -52,49 +53,6 @@ function validarLocalizacao(localizacao) {
 
   return { latitude, longitude, acuraciaMetros };
 }
-
-function formatarAlerta(row) {
-  const latitude = row.localizacao_latitude ?? row.latitude;
-  const longitude = row.localizacao_longitude ?? row.longitude;
-
-  return {
-    id: row.id,
-    protocolo: row.protocolo,
-    clienteId: String(row.usuario_id),
-    tipo: row.tipo,
-    status: row.status,
-    prioridade: row.prioridade,
-    quantidadeAcionamentos: row.quantidade_acionamentos || 1,
-    localizacao: latitude === null || latitude === undefined
-      ? null
-      : {
-          latitude,
-          longitude,
-          acuraciaMetros: row.localizacao_acuracia_metros ?? row.acuracia_metros,
-        },
-    dispositivo: row.dispositivo,
-    ipOrigem: row.ip_origem,
-    origem: row.origem,
-    observacoes: row.observacoes,
-    timestamp: row.criado_em,
-    atualizadoEm: row.atualizado_em,
-    encerradoEm: row.encerrado_em,
-  };
-}
-
-const SELECT_DENUNCIA = `
-  SELECT d.*,
-         l.latitude AS localizacao_latitude,
-         l.longitude AS localizacao_longitude,
-         l.acuracia_metros AS localizacao_acuracia_metros
-  FROM denuncias d
-  LEFT JOIN localizacoes l ON l.id = (
-    SELECT l2.id
-    FROM localizacoes l2
-    WHERE l2.denuncia_id = d.id
-    ORDER BY l2.registrado_em DESC, l2.id DESC
-    LIMIT 1
-  )`;
 
 function gerarProtocolo() {
   const agora = new Date();
@@ -293,13 +251,20 @@ router.patch('/:id/status', async (req, res, next) => {
       return res.status(404).json({ sucesso: false, mensagem: 'Alerta não encontrado.' });
     }
 
+    // observacoes ausente = manter o texto atual; string vazia = limpar.
+    const temObs = observacoes !== undefined;
+    const notas = temObs ? (String(observacoes ?? '').trim().slice(0, 5000) || null) : null;
+    const assumindo = status === 'EM_ATENDIMENTO';
+
     await run(
       `UPDATE denuncias
-       SET status = ?, observacoes = ?,
-           encerrado_em = IF(?, CURRENT_TIMESTAMP, NULL),
+       SET status = ?,
+           observacoes = IF(?, ?, observacoes),
+           atendente_id = IF(?, ?, COALESCE(atendente_id, ?)),
+           encerrado_em = IF(?, COALESCE(encerrado_em, CURRENT_TIMESTAMP), NULL),
            atualizado_em = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [status, observacoes ? String(observacoes).slice(0, 5000) : null, encerrar, req.params.id]
+      [status, temObs, notas, assumindo, req.usuario.id, req.usuario.id, encerrar, req.params.id]
     );
 
     const alerta = await get(

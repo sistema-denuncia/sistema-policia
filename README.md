@@ -50,8 +50,8 @@ Requisitos: Node.js, npm e Docker Desktop.
    ```
 
    As credenciais padrão do MySQL local são `root` / `root`. Se alterar essas
-   credenciais no Docker, atualize também `DB_USER`, `DB_PASSWORD`, `DB_HOST`,
-   `DB_PORT` e `DB_NAME` no `.env`.
+   credenciais no Docker, atualize também `MYSQL_USER`, `MYSQL_PASSWORD`,
+   `MYSQL_HOST`, `MYSQL_PORT` e `MYSQL_DATABASE` no `.env`.
 
 3. Abra o painel em `http://localhost:3001`. Verifique a conexão em
    `http://localhost:3001/api/saude`.
