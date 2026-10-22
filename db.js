@@ -3,8 +3,8 @@
 //   get(sql, params)  → row | null
 //   all(sql, params)  → row[]
 //
-// Todas as tabelas (incluindo alertas_policia) são criadas pelo banco.sql
-// carregado pelo Docker ao iniciar o container.
+// As tabelas de usuários vêm do banco.sql; alertas_policia é garantida na
+// inicialização para também funcionar com volumes MySQL criados anteriormente.
 
 const { pool, testarConexao, fecharConexao } = require('./database/mysql');
 
@@ -37,13 +37,38 @@ async function all(sql, params = []) {
 }
 
 /**
- * Inicializa o banco — no SQLite criávamos as tabelas aqui,
- * mas no MySQL elas já existem via banco.sql (docker-entrypoint-initdb.d).
- * Mantemos a função para não quebrar a chamada em server.js.
+ * Garante a tabela de alertas em instalações novas e em volumes MySQL existentes.
  */
 async function inicializarBanco() {
   // Garante que a conexão está viva antes de continuar.
   await testarConexao();
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS alertas_policia (
+      id VARCHAR(36) NOT NULL PRIMARY KEY,
+      protocolo VARCHAR(30) NOT NULL UNIQUE,
+      cliente_id VARCHAR(100) NOT NULL,
+      tipo VARCHAR(30) NOT NULL DEFAULT 'EMERGENCIA',
+      status ENUM('ATIVO', 'EM_ATENDIMENTO', 'RESOLVIDO', 'FALSO_ALARME')
+        NOT NULL DEFAULT 'ATIVO',
+      prioridade ENUM('BAIXA', 'MEDIA', 'ALTA', 'CRITICA') NOT NULL DEFAULT 'ALTA',
+      quantidade_acionamentos INT NOT NULL DEFAULT 1,
+      latitude DOUBLE,
+      longitude DOUBLE,
+      acuracia_metros DOUBLE,
+      dispositivo VARCHAR(2000),
+      ip_origem VARCHAR(45),
+      origem VARCHAR(100) NOT NULL DEFAULT 'botao-emergencia-web',
+      observacoes TEXT,
+      criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      encerrado_em TIMESTAMP NULL,
+      INDEX idx_alertas_cliente (cliente_id),
+      INDEX idx_alertas_status (status, criado_em),
+      INDEX idx_alertas_tipo (tipo, criado_em),
+      INDEX idx_alertas_criado (criado_em)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
 
   const [indexes] = await pool.query(
     `SELECT INDEX_NAME, NON_UNIQUE, COUNT(*) AS COLUMN_COUNT,

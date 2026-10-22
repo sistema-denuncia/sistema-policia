@@ -1,6 +1,6 @@
 # Sistema de Denúncia / Emergência
 
-As ocorrências são armazenadas em SQLite. Os usuários e agentes são armazenados em MySQL na tabela `atendentes`.
+As ocorrências e os usuários/agentes são armazenados em MySQL. Os agentes ficam na tabela `atendentes`.
 
 ## Fluxo
 
@@ -15,7 +15,7 @@ Botão de emergência (porta 3000)
   ▼
 Backend da polícia (porta 3001)
   │
-  ├── grava no SQLite
+  ├── grava no MySQL
   └── emite novo-alerta via Socket.IO
             │
             ▼
@@ -30,13 +30,9 @@ Inicie o MySQL pelo Docker Compose na raiz do projeto:
 docker compose -f database/docker-compose.yml up -d
 ```
 
-O backend conecta ao MySQL em `127.0.0.1:3307`, banco `projeto_denuncia`, e usa o SQLite em:
+O backend conecta ao MySQL em `127.0.0.1:3307`, banco `projeto_denuncia`.
 
-```text
-database/emergencia.db
-```
-
-O Compose cria a tabela `atendentes` a partir de `database/banco.sql`. O backend também mantém as tabelas de ocorrências no SQLite.
+O Compose cria a tabela `atendentes` a partir de `database/banco.sql`. Ao iniciar, o backend garante que a tabela `alertas_policia` exista no MySQL, inclusive em volumes criados antes dessa tabela ser adicionada.
 
 Ao iniciar, o backend garante que `cliente_id` em `alertas_policia` tenha um
 índice não exclusivo. Assim, o mesmo cliente pode gerar novos alertas depois
@@ -51,7 +47,7 @@ npm install
 npm start
 ```
 
-Na primeira execução, o arquivo `database/emergencia.db` será criado automaticamente. Os agentes que já estavam no SQLite são copiados para `atendentes` no MySQL sem sobrescrever usuários existentes.
+Os agentes cadastrados ficam na tabela `atendentes` do MySQL.
 
 ### 2. Backend do botão
 
