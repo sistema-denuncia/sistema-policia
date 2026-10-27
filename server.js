@@ -420,8 +420,11 @@ app.use((err, req, res, next) => {
 
 io.on('connection', async (socket) => {
   try {
-    const rows = await all(`${SELECT_DENUNCIA} ORDER BY d.criado_em DESC LIMIT 100`);
-    const alertas = rows.map(formatarAlerta);
+    const [ativas, recentes] = await Promise.all([
+      all(`${SELECT_DENUNCIA} WHERE d.status = 'ATIVO' ORDER BY d.criado_em DESC, d.id DESC`),
+      all(`${SELECT_DENUNCIA} WHERE d.status <> 'ATIVO' ORDER BY d.criado_em DESC, d.id DESC LIMIT 100`),
+    ]);
+    const alertas = [...ativas, ...recentes].map(formatarAlerta);
 
     socket.emit('carregar-alertas', alertas);
   } catch (err) {

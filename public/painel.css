@@ -34,7 +34,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .empty{padding:70px 20px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:10px}
 .empty strong{display:block;color:var(--text);font-size:15px;margin-bottom:4px}
 
-.card{--c:var(--muted);position:relative;display:grid;grid-template-columns:104px 1fr auto;gap:18px;align-items:center;padding:14px 18px 14px 22px;background:var(--panel);border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:border-color .15s,background .15s}
+.card{--c:var(--muted);position:relative;display:grid;grid-template-columns:130px 1fr auto;gap:18px;align-items:center;padding:14px 18px 14px 22px;background:var(--panel);border:1px solid var(--line);border-radius:10px;cursor:pointer;transition:border-color .15s,background .15s}
 .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;border-radius:10px 0 0 10px;background:var(--c)}
 .card:hover{background:var(--panel2);border-color:var(--c)}
 .card.p-critica{--c:var(--crit)}.card.p-alta{--c:var(--alta)}.card.p-media{--c:var(--media)}.card.p-baixa{--c:var(--baixa)}
@@ -42,7 +42,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .card.novo{animation:entrada .5s ease-out}
 .card.p-critica.s-ativo{box-shadow:0 0 0 1px var(--crit),0 0 24px rgba(255,77,90,.18)}
 .timer{text-align:center;padding-right:14px;border-right:1px solid var(--line)}
-.timer b{display:block;font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.timer b{display:block;font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
 .timer small{color:var(--muted);font-size:11px;font-weight:600}
 .card.late .timer b{color:var(--alta)}.card.vlate .timer b{color:var(--crit)}
 .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;font-size:12px;color:var(--muted)}
