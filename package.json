@@ -1,6 +1,6 @@
 {
   "name": "sistema-policia-backend",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Backend e painel policial para receber e gerenciar alertas de emergência com MySQL",
   "main": "server.js",
   "scripts": {
@@ -14,7 +14,6 @@
     "express-rate-limit": "^7.2.0",
     "mysql2": "^3.24.6",
     "socket.io": "^4.6.0",
-    "sqlite3": "^5.1.7",
     "uuid": "^9.0.0"
   },
   "devDependencies": {
