@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const { v4: uuidv4 } = require('uuid');
-const { run, get, all } = require('../db');
+const { run, get, all, transaction } = require('../db');
+const { SELECT_DENUNCIA, formatarAlerta } = require('../lib/alertas');
 
 const router = express.Router();
 
@@ -10,7 +10,7 @@ const PRIORIDADES_VALIDAS = ['BAIXA', 'MEDIA', 'ALTA', 'CRITICA'];
 
 const emergenciaLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.EMERGENCIA_RATE_LIMIT || 30),
+  max: Number(process.env.EMERGENCIA_RATE_LIMIT || 100),
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -19,51 +19,39 @@ function getIp(req) {
   return req.ip || req.socket.remoteAddress || null;
 }
 
-function normalizarNumero(valor) {
+function normalizarNumero(valor, campo) {
   if (valor === null || valor === undefined || valor === '') return null;
   const numero = Number(valor);
-  return Number.isFinite(numero) ? numero : null;
+  if (!Number.isFinite(numero)) throw new Error(`${campo} inválida.`);
+  return numero;
 }
 
 function validarLocalizacao(localizacao) {
-  if (!localizacao) return { latitude: null, longitude: null };
+  if (!localizacao) {
+    return { latitude: null, longitude: null, acuraciaMetros: null };
+  }
 
-  const latitude = normalizarNumero(localizacao.latitude);
-  const longitude = normalizarNumero(localizacao.longitude);
+  const latitude = normalizarNumero(localizacao.latitude, 'Latitude');
+  const longitude = normalizarNumero(localizacao.longitude, 'Longitude');
+  const acuraciaMetros = normalizarNumero(
+    localizacao.acuraciaMetros ?? localizacao.accuracy,
+    'Acurácia'
+  );
 
+  if ((latitude === null) !== (longitude === null)) {
+    throw new Error('Latitude e longitude devem ser informadas juntas.');
+  }
   if (latitude !== null && (latitude < -90 || latitude > 90)) {
     throw new Error('Latitude inválida.');
   }
   if (longitude !== null && (longitude < -180 || longitude > 180)) {
     throw new Error('Longitude inválida.');
   }
+  if (acuraciaMetros !== null && acuraciaMetros < 0) {
+    throw new Error('Acurácia inválida.');
+  }
 
-  return { latitude, longitude };
-}
-
-function formatarAlerta(row) {
-  return {
-    id: row.id,
-    protocolo: row.protocolo,
-    clienteId: row.cliente_id,
-    tipo: row.tipo,
-    status: row.status,
-    prioridade: row.prioridade,
-    quantidadeAcionamentos: row.quantidade_acionamentos || 1,
-    localizacao: row.latitude === null && row.longitude === null
-      ? null
-      : {
-          latitude: row.latitude,
-          longitude: row.longitude,
-        },
-    dispositivo: row.dispositivo,
-    ipOrigem: row.ip_origem,
-    origem: row.origem,
-    observacoes: row.observacoes,
-    timestamp: row.criado_em,
-    atualizadoEm: row.atualizado_em,
-    encerradoEm: row.encerrado_em,
-  };
+  return { latitude, longitude, acuraciaMetros };
 }
 
 function gerarProtocolo() {
@@ -73,96 +61,136 @@ function gerarProtocolo() {
   return `EMERG-${data}-${sufixo}`;
 }
 
-function paraMySqlDateTime(date = new Date()) {
-  return new Date(date).toISOString().slice(0, 19).replace('T', ' ');
-}
+router.post('/', emergenciaLimiter, async (req, res, next) => {
+  const { clienteId, tipo, prioridade, dispositivo, localizacao } = req.body || {};
+  const usuarioId = Number(clienteId);
 
-router.post('/', emergenciaLimiter, async (req, res) => {
-  const { clienteId, tipo, prioridade, dispositivo, localizacao } = req.body;
-
-  if (!clienteId || typeof clienteId !== 'string' || clienteId.length > 100) {
-    return res.status(400).json({ sucesso: false, mensagem: 'clienteId é obrigatório.' });
+  if (!Number.isSafeInteger(usuarioId) || usuarioId <= 0) {
+    return res.status(400).json({
+      sucesso: false,
+      mensagem: 'clienteId deve ser o ID numérico de um usuário cadastrado.',
+    });
   }
 
+  let loc;
   try {
-    const loc = validarLocalizacao(localizacao);
-    // Só considera "existente" um alerta ainda aberto (não encerrado).
-    // Se estiver RESOLVIDO ou FALSO_ALARME, cria um novo chamado.
-    const existente = await get(
-      `SELECT * FROM alertas_policia
-       WHERE cliente_id = ? AND status NOT IN ('RESOLVIDO', 'FALSO_ALARME')
-       LIMIT 1`,
-      [clienteId]
-    );
+    loc = validarLocalizacao(localizacao);
+  } catch (err) {
+    return res.status(400).json({ sucesso: false, mensagem: err.message });
+  }
 
-    if (existente) {
-      await run(
-        `UPDATE alertas_policia
-         SET quantidade_acionamentos = COALESCE(quantidade_acionamentos, 1) + 1
-         WHERE id = ?`,
-        [existente.id]
+  const tipoFinal = typeof tipo === 'string' && tipo.trim()
+    ? tipo.trim().slice(0, 30)
+    : 'EMERGENCIA';
+  const prioridadeFinal = PRIORIDADES_VALIDAS.includes(prioridade) ? prioridade : 'ALTA';
+  const dispositivoFinal = dispositivo ? String(dispositivo).slice(0, 100) : null;
+
+  try {
+    const resultado = await transaction(async ({ run: executar, get: buscar }) => {
+      const usuario = await buscar(
+        'SELECT id FROM usuarios WHERE id = ? FOR UPDATE',
+        [usuarioId]
       );
 
-      const alertaAtualizado = formatarAlerta(await get(
-        'SELECT * FROM alertas_policia WHERE id = ?',
-        [existente.id]
-      ));
+      if (!usuario) return { usuarioInexistente: true };
 
-      req.app.get('io').emit('alerta-atualizado', alertaAtualizado);
+      const denunciaAtiva = await buscar(
+        `SELECT id FROM denuncias
+         WHERE usuario_id = ? AND status IN ('ATIVO', 'EM_ATENDIMENTO')
+         ORDER BY id DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [usuarioId]
+      );
 
-      return res.status(200).json({
-        sucesso: true,
-        mensagem: 'Este acionamento já foi registrado. A nova tentativa foi contabilizada.',
-        id: alertaAtualizado.id,
-        protocolo: alertaAtualizado.protocolo,
-        quantidadeAcionamentos: alertaAtualizado.quantidadeAcionamentos,
-        alerta: alertaAtualizado,
-        duplicado: true,
+      let denunciaId;
+      let duplicado = false;
+
+      if (denunciaAtiva) {
+        denunciaId = denunciaAtiva.id;
+        duplicado = true;
+        await executar(
+          `UPDATE denuncias
+           SET quantidade_acionamentos = quantidade_acionamentos + 1,
+               dispositivo = ?,
+               ip_origem = ?
+           WHERE id = ?`,
+          [dispositivoFinal, getIp(req), denunciaId]
+        );
+      } else {
+        const protocolo = gerarProtocolo();
+        const insercao = await executar(
+          `INSERT INTO denuncias
+            (protocolo, usuario_id, tipo, status, prioridade, quantidade_acionamentos,
+             latitude, longitude, acuracia_metros, dispositivo, ip_origem, origem)
+           VALUES (?, ?, ?, 'ATIVO', ?, 1, ?, ?, ?, ?, ?, 'botao-emergencia-web')`,
+          [
+            protocolo,
+            usuarioId,
+            tipoFinal,
+            prioridadeFinal,
+            loc.latitude,
+            loc.longitude,
+            loc.acuraciaMetros,
+            dispositivoFinal,
+            getIp(req),
+          ]
+        );
+        denunciaId = insercao.lastID;
+      }
+
+      if (loc.latitude !== null && loc.longitude !== null) {
+        await executar(
+          `INSERT INTO localizacoes
+            (denuncia_id, latitude, longitude, acuracia_metros)
+           VALUES (?, ?, ?, ?)`,
+          [denunciaId, loc.latitude, loc.longitude, loc.acuraciaMetros]
+        );
+
+        if (duplicado) {
+          await executar(
+            `UPDATE denuncias
+             SET latitude = ?, longitude = ?, acuracia_metros = ?
+             WHERE id = ?`,
+            [loc.latitude, loc.longitude, loc.acuraciaMetros, denunciaId]
+          );
+        }
+      }
+
+      return { denunciaId, duplicado };
+    });
+
+    if (resultado.usuarioInexistente) {
+      return res.status(404).json({
+        sucesso: false,
+        mensagem: 'O clienteId informado não corresponde a um usuário cadastrado.',
       });
     }
 
-    const id = uuidv4();
-    const protocolo = gerarProtocolo();
-    const tipoFinal = typeof tipo === 'string' && tipo.trim()
-      ? tipo.trim().slice(0, 30)
-      : 'EMERGENCIA';
-    const prioridadeFinal = PRIORIDADES_VALIDAS.includes(prioridade) ? prioridade : 'ALTA';
-    const dispositivoFinal = dispositivo ? String(dispositivo).slice(0, 2000) : null;
-
-    await run(
-      `INSERT INTO alertas_policia
-        (id, protocolo, cliente_id, tipo, status, prioridade, latitude, longitude,
-         dispositivo, ip_origem)
-         VALUES (?, ?, ?, ?, 'ATIVO', ?, ?, ?, ?, ?)`,
-      [
-        id,
-        protocolo,
-        clienteId,
-        tipoFinal,
-        prioridadeFinal,
-        loc.latitude,
-        loc.longitude,
-        dispositivoFinal,
-        getIp(req),
-      ]
+    const row = await get(
+      `${SELECT_DENUNCIA} WHERE d.id = ?`,
+      [resultado.denunciaId]
     );
+    const alerta = formatarAlerta(row);
 
-    const alerta = formatarAlerta(await get(
-      'SELECT * FROM alertas_policia WHERE id = ?',
-      [id]
-    ));
+    req.app.get('io').emit(resultado.duplicado ? 'novo-acionamento' : 'novo-alerta', alerta);
 
-    req.app.get('io').emit('novo-alerta', alerta);
-
-    return res.status(201).json({
+    return res.status(resultado.duplicado ? 200 : 201).json({
       sucesso: true,
-      mensagem: 'Alerta recebido com sucesso.',
+      mensagem: resultado.duplicado
+        ? 'Este acionamento já foi registrado. A nova tentativa foi contabilizada.'
+        : 'Alerta recebido com sucesso.',
       id: alerta.id,
       protocolo: alerta.protocolo,
+      ...(resultado.duplicado ? {
+        quantidadeAcionamentos: alerta.quantidadeAcionamentos,
+        alerta,
+        duplicado: true,
+      } : {}),
     });
   } catch (err) {
     console.error('Erro ao registrar emergência:', err);
-    return res.status(400).json({ sucesso: false, mensagem: err.message || 'Dados inválidos.' });
+    next(err);
   }
 });
 
@@ -171,52 +199,16 @@ router.get('/', async (req, res, next) => {
     const status = req.query.status;
     const { periodo, data } = req.query;
     const params = [];
-    let sql = 'SELECT * FROM alertas_policia';
-    const conditions = [];
-
-    if (periodo !== undefined || data !== undefined) {
-      if (!['dia', 'mes', 'ano'].includes(periodo) || typeof data !== 'string') {
-        return res.status(400).json({ sucesso: false, mensagem: 'Informe um período e uma data válidos.' });
-      }
-
-      let inicio;
-      let fim;
-      if (periodo === 'dia' && /^\d{4}-\d{2}-\d{2}$/.test(data)) {
-        inicio = new Date(`${data}T00:00:00.000Z`);
-        if (inicio.toISOString().slice(0, 10) === data) {
-          fim = new Date(inicio);
-          fim.setUTCDate(fim.getUTCDate() + 1);
-        }
-      } else if (periodo === 'mes' && /^\d{4}-\d{2}$/.test(data)) {
-        inicio = new Date(`${data}-01T00:00:00.000Z`);
-        if (inicio.toISOString().slice(0, 7) === data) {
-          fim = new Date(inicio);
-          fim.setUTCMonth(fim.getUTCMonth() + 1);
-        }
-      } else if (periodo === 'ano' && /^\d{4}$/.test(data)) {
-        inicio = new Date(`${data}-01-01T00:00:00.000Z`);
-        if (inicio.toISOString().slice(0, 4) === data) {
-          fim = new Date(inicio);
-          fim.setUTCFullYear(fim.getUTCFullYear() + 1);
-        }
-      }
-
-      if (!inicio || !fim || Number.isNaN(inicio.getTime()) || Number.isNaN(fim.getTime())) {
-        return res.status(400).json({ sucesso: false, mensagem: 'Data inválida para o período selecionado.' });
-      }
-
-      conditions.push('criado_em >= ? AND criado_em < ?');
-      params.push(inicio.toISOString().slice(0, 19).replace('T', ' '), fim.toISOString().slice(0, 19).replace('T', ' '));
-    }
+    let sql = SELECT_DENUNCIA;
 
     if (status && STATUS_VALIDOS.includes(status)) {
-      conditions.push('status = ?');
+      sql += ' WHERE d.status = ?';
       params.push(status);
     }
 
-    if (conditions.length) sql += ` WHERE ${conditions.join(' AND ')}`;
-    sql += ' ORDER BY criado_em DESC';
-    if (periodo === undefined && data === undefined) sql += ' LIMIT 100';
+    sql += status === 'ATIVO'
+      ? ' ORDER BY d.criado_em DESC, d.id DESC'
+      : ' ORDER BY d.criado_em DESC, d.id DESC LIMIT 100';
 
     const rows = await all(sql, params);
     res.json({ total: rows.length, alertas: rows.map(formatarAlerta) });
@@ -227,7 +219,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const row = await get('SELECT * FROM alertas_policia WHERE id = ?', [req.params.id]);
+    const row = await get(`${SELECT_DENUNCIA} WHERE d.id = ?`, [req.params.id]);
 
     if (!row) {
       return res.status(404).json({ sucesso: false, mensagem: 'Alerta não encontrado.' });
@@ -250,29 +242,41 @@ router.patch('/:id/status', async (req, res, next) => {
   }
 
   try {
-    const encerradoEm = ['RESOLVIDO', 'FALSO_ALARME'].includes(status)
-      ? paraMySqlDateTime()
-      : null;
+    const encerrar = ['RESOLVIDO', 'FALSO_ALARME'].includes(status);
 
-    const result = await run(
-      `UPDATE alertas_policia
-       SET status = ?, observacoes = ?,
-           encerrado_em = ?
-       WHERE id = ?`,
-      [status, observacoes ? String(observacoes).slice(0, 5000) : null, encerradoEm, req.params.id]
+    const existente = await get(
+      'SELECT id FROM denuncias WHERE id = ?',
+      [req.params.id]
     );
 
-    if (!result.changes) {
+    if (!existente) {
       return res.status(404).json({ sucesso: false, mensagem: 'Alerta não encontrado.' });
     }
 
-    const alerta = formatarAlerta(await get(
-      'SELECT * FROM alertas_policia WHERE id = ?',
-      [req.params.id]
-    ));
+    // observacoes ausente = manter o texto atual; string vazia = limpar.
+    const temObs = observacoes !== undefined;
+    const notas = temObs ? (String(observacoes ?? '').trim().slice(0, 5000) || null) : null;
+    const assumindo = status === 'EM_ATENDIMENTO';
 
-    req.app.get('io').emit('alerta-atualizado', alerta);
-    res.json({ sucesso: true, mensagem: 'Status atualizado.', alerta });
+    await run(
+      `UPDATE denuncias
+       SET status = ?,
+           observacoes = IF(?, ?, observacoes),
+           atendente_id = IF(?, ?, COALESCE(atendente_id, ?)),
+           encerrado_em = IF(?, COALESCE(encerrado_em, CURRENT_TIMESTAMP), NULL),
+           atualizado_em = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [status, temObs, notas, assumindo, req.usuario.id, req.usuario.id, encerrar, req.params.id]
+    );
+
+    const alerta = await get(
+      `${SELECT_DENUNCIA} WHERE d.id = ?`,
+      [req.params.id]
+    );
+
+    const alertaFormatado = formatarAlerta(alerta);
+    req.app.get('io').emit('alerta-atualizado', alertaFormatado);
+    res.json({ sucesso: true, mensagem: 'Status atualizado.', alerta: alertaFormatado });
   } catch (err) {
     next(err);
   }
