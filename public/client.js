@@ -20,7 +20,7 @@ const pos = a => a.localizacao && Number.isFinite(+a.localizacao.latitude) && Nu
 
 function dur(ms) {
   const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), p = n => String(n).padStart(2, '0');
-  return h ? `${h}h${p(m)}` : `${p(m)}:${p(s % 60)}`;
+  return `${p(h)}:${p(m)}:${p(s % 60)}`;
 }
 function ha(v) {
   const t = ts(v); if (t === null) return '—';
@@ -55,7 +55,7 @@ function cardHtml(a, novo) {
   const fim = fechado ? ` data-until="${esc(a.encerradoEm || a.atualizadoEm)}"` : '';
   const legenda = ativo ? 'aguardando' : fechado ? 'duração' : 'aberta há';
   return `<article class="card p-${cls} s-${ativo ? 'ativo' : 'outro'}${fechado ? ' fechado' : ''}${novo ? ' novo' : ''}" data-id="${esc(a.id)}" data-since="${esc(a.timestamp)}" tabindex="0" role="button" aria-label="Abrir ocorrência de ${esc(nomeDe(a))}">
-    <div class="timer"><b data-since="${esc(a.timestamp)}"${fim}>--:--</b><small>${legenda}</small></div>
+    <div class="timer"><b data-since="${esc(a.timestamp)}"${fim}>--:--:--</b><small>${legenda}</small></div>
     <div>
       <div class="top"><span class="prio">${rotulo}</span><span class="tipo">${esc(a.tipo || 'Emergência')}</span>${repetido(a)}<span>${esc(STATUS[a.status] || a.status)}</span></div>
       <h3 class="nome">${esc(nomeDe(a))}${a.solicitante?.idade != null ? `<span>${a.solicitante.idade} anos</span>` : ''}</h3>
@@ -100,17 +100,24 @@ function renderizar() {
 function tique() {
   $('relogio').textContent = new Date().toLocaleTimeString('pt-BR');
   document.querySelectorAll('.timer b[data-since]').forEach(el => {
+    const inicio = ts(el.dataset.since);
     const fim = el.dataset.until ? ts(el.dataset.until) : Date.now();
-    el.textContent = ts(el.dataset.since) && fim ? dur(fim - ts(el.dataset.since)) : '--:--';
+    el.textContent = inicio !== null && fim !== null ? dur(fim - inicio) : '--:--:--';
   });
-  let maior = 0;
   document.querySelectorAll('.card.s-ativo').forEach(c => {
-    const e = Date.now() - ts(c.dataset.since);
-    c.classList.toggle('late', e > 180000 && e <= 360000);
-    c.classList.toggle('vlate', e > 360000);
+    const inicio = ts(c.dataset.since);
+    const espera = inicio === null ? null : Date.now() - inicio;
+    c.classList.toggle('late', espera !== null && espera > 180000 && espera <= 360000);
+    c.classList.toggle('vlate', espera !== null && espera > 360000);
   });
-  alertas.filter(a => a.status === 'ATIVO').forEach(a => { maior = Math.max(maior, Date.now() - ts(a.timestamp)); });
-  $('metricEspera').textContent = maior ? dur(maior) : '--:--';
+  const maiorEspera = alertas.reduce((maior, a) => {
+    if (a.status !== 'ATIVO') return maior;
+    const inicio = ts(a.timestamp);
+    if (inicio === null) return maior;
+    const espera = Math.max(0, Date.now() - inicio);
+    return maior === null ? espera : Math.max(maior, espera);
+  }, null);
+  $('metricEspera').textContent = maiorEspera === null ? '--:--:--' : dur(maiorEspera);
   if (document.hidden && pendentes > 0) document.title = document.title.startsWith('⚠') ? `(${pendentes}) ${BASE}` : `⚠ ${pendentes} NOVO(S) ACIONAMENTO(S)`;
 }
 setInterval(tique, 1000);

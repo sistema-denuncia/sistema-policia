@@ -118,6 +118,19 @@ async function verificarHashSenha(senha, senhaSalva) {
   return crypto.timingSafeEqual(hashSalvo, hashRecebido);
 }
 
+async function garantirTabelaUsuarios() {
+  await mysqlPool.execute(`
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      nome VARCHAR(100) NOT NULL,
+      cpf VARCHAR(14) NOT NULL UNIQUE,
+      data_nascimento DATE NOT NULL,
+      email VARCHAR(150) NOT NULL UNIQUE,
+      senha VARCHAR(255) NOT NULL,
+      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
 
 async function garantirTabelaAtendentes() {
   await mysqlPool.execute(`
@@ -199,7 +212,7 @@ app.post('/api/auth/login', async (req, res, next) => {
   }
 
   try {
-    const [rows] = await pool.execute(
+    const [rows] = await mysqlPool.execute(
       'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM atendentes WHERE usuario = ? AND ativo = 1 LIMIT 1',
       [usuarioLogin]
     );
@@ -251,7 +264,7 @@ app.post('/api/usuarios', requireApiKey, async (req, res, next) => {
 
   try {
     const senhaHash = await criarHashSenha(senha);
-    const [result] = await pool.execute(
+    const [result] = await mysqlPool.execute(
       'INSERT INTO usuarios (nome, cpf, data_nascimento, email, senha) VALUES (?, ?, ?, ?, ?)',
       [nome, cpf, dataNascimento, email, senhaHash]
     );
@@ -275,7 +288,7 @@ app.post('/api/usuarios/login', requireApiKey, async (req, res, next) => {
   }
 
   try {
-    const [usuarios] = await pool.execute(
+    const [usuarios] = await mysqlPool.execute(
       'SELECT id, nome, email, senha FROM usuarios WHERE email = ? LIMIT 1',
       [email]
     );
@@ -312,7 +325,7 @@ function validarApiKey(req, res, next) {
 }
 app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   try {
-    const [atendentes] = await pool.execute('SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome');
+    const [atendentes] = await mysqlPool.execute('SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome');
     const usuarios = atendentes.map((row) => ({
       ...usuarioPublico(row),
       ativo: Boolean(row.ativo),
@@ -346,7 +359,7 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   try {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
-    const [result] = await pool.execute(
+    const [result] = await mysqlPool.execute(
       'INSERT INTO atendentes (nome, usuario, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?)',
       [nome, usuario, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
@@ -405,8 +418,11 @@ app.use((err, req, res, next) => {
 
 io.on('connection', async (socket) => {
   try {
-    const rows = await all(`${SELECT_DENUNCIA} ORDER BY d.criado_em DESC LIMIT 100`);
-    const alertas = rows.map(formatarAlerta);
+    const [ativas, recentes] = await Promise.all([
+      all(`${SELECT_DENUNCIA} WHERE d.status = 'ATIVO' ORDER BY d.criado_em DESC, d.id DESC`),
+      all(`${SELECT_DENUNCIA} WHERE d.status <> 'ATIVO' ORDER BY d.criado_em DESC, d.id DESC LIMIT 100`),
+    ]);
+    const alertas = [...ativas, ...recentes].map(formatarAlerta);
 
     socket.emit('carregar-alertas', alertas);
   } catch (err) {

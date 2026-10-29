@@ -206,7 +206,9 @@ router.get('/', async (req, res, next) => {
       params.push(status);
     }
 
-    sql += ' ORDER BY d.criado_em DESC, d.id DESC LIMIT 100';
+    sql += status === 'ATIVO'
+      ? ' ORDER BY d.criado_em DESC, d.id DESC'
+      : ' ORDER BY d.criado_em DESC, d.id DESC LIMIT 100';
 
     const rows = await all(sql, params);
     res.json({ total: rows.length, alertas: rows.map(formatarAlerta) });
