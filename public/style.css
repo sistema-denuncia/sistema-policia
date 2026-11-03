@@ -348,11 +348,43 @@ button { font: inherit; }
 .admin-panel .form-intro { margin-bottom:18px; }
 .admin-form { width:min(100%,600px); }
 .admin-form .field-label { margin-top:16px; }
-.history-filters { display:grid; grid-template-columns:auto minmax(150px,220px) auto minmax(150px,220px) auto auto; align-items:end; gap:10px; margin:18px 0 4px; }
-.history-filters .field-label { margin:0; }
+.history-filters { display:grid; grid-template-columns:repeat(4,minmax(130px,1fr)) auto auto; align-items:end; gap:10px; margin:18px 0 4px; }
+.history-filter-field { display:grid; gap:7px; }
+.history-filter-field .field-label { margin:0; }
 .history-filters select,
 .history-filters input { min-width:0; }
 .history-filters .submit-button { min-height:42px; margin-top:0; }
+.users-filters { display:grid; grid-template-columns:minmax(160px,210px) minmax(180px,210px) auto auto; justify-content:start; align-items:end; gap:10px; margin:18px 0 4px; }
+.user-filter-field { display:grid; gap:7px; }
+.user-filter-field .field-label { margin:0; }
+.user-filter-field select,
+.user-filter-field input { min-width:0; }
+.users-filters .submit-button { min-height:42px; margin-top:0; }
+.stats-summary { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin:18px 0; }
+.stats-filters { display:grid; grid-template-columns:minmax(150px,200px) minmax(160px,200px) auto; align-items:end; justify-content:start; gap:10px; margin:18px 0 4px; }
+.stats-filters .submit-button { min-height:42px; margin-top:0; }
+.stats-kpi,
+.stats-card { padding:16px; border:1px solid var(--line); border-radius:8px; background:rgba(12,26,42,.72); }
+.stats-kpi { display:grid; gap:7px; }
+.stats-kpi strong { color:var(--cyan); font-size:24px; line-height:1; }
+.stats-kpi span { color:var(--muted); font-size:10px; }
+.stats-charts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.stats-card h3 { margin-bottom:16px; font-size:13px; }
+.stats-card-wide { grid-column:1 / -1; }
+#stats-series-card[hidden] { display:none; }
+.stats-bars { display:grid; gap:12px; }
+.stats-bar-row { display:grid; grid-template-columns:minmax(90px,130px) minmax(40px,1fr) 28px; align-items:center; gap:10px; }
+.stats-bar-label { overflow:hidden; color:var(--muted); font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+.stats-bar-track { height:9px; overflow:hidden; border-radius:99px; background:rgba(148,163,184,.12); }
+.stats-bar-fill { display:block; height:100%; min-width:0; border-radius:inherit; background:linear-gradient(90deg,var(--blue),var(--cyan)); }
+.stats-bar-value { color:var(--text); font:600 10px "JetBrains Mono",monospace; text-align:right; }
+.stats-chart-scroll { overflow-x:auto; }
+.stats-daily-bars { display:grid; grid-auto-columns:minmax(18px,1fr); grid-auto-flow:column; align-items:end; gap:8px; min-width:720px; padding:8px 0 0; border-bottom:1px solid var(--line-strong); }
+.stats-column { display:grid; grid-template-rows:16px 1fr 20px; align-items:end; gap:5px; height:220px; min-width:0; text-align:center; }
+.stats-column-value { color:var(--text); font:600 9px "JetBrains Mono",monospace; }
+.stats-column-track { display:flex; align-items:flex-end; justify-content:center; height:100%; }
+.stats-column-fill { display:block; width:min(100%,24px); min-height:2px; border-radius:4px 4px 0 0; background:linear-gradient(180deg,var(--cyan),var(--blue)); }
+.stats-column-label { color:var(--muted); font:9px "JetBrains Mono",monospace; }
 .history-clear { min-height:42px; padding:0 12px; border:1px solid var(--line); border-radius:6px; color:var(--text); background:transparent; font:600 10px "JetBrains Mono",monospace; cursor:pointer; }
 .history-clear:hover { border-color:var(--cyan); }
 .history-table { min-width:650px; }
@@ -375,7 +407,14 @@ button { font: inherit; }
   .admin-tabs { align-items:stretch; flex-direction:column; gap:9px; }
   .admin-tab { width:100%; min-height:50px; padding:0 14px; font-size:11px; }
   .history-filters { grid-template-columns:1fr 1fr; }
+  .users-filters { grid-template-columns:1fr 1fr; }
+  .stats-filters { grid-template-columns:1fr 1fr; }
+  .stats-filters .submit-button { width:100%; }
+  .stats-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .stats-charts { grid-template-columns:1fr; }
+  .stats-card-wide { grid-column:auto; }
   .history-filters .submit-button,
+  .users-filters .submit-button,
   .history-clear { width:100%; }
   .admin-table th,
   .admin-table td { padding:10px 8px; }
