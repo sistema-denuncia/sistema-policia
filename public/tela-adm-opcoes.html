@@ -37,6 +37,7 @@
 
 				<label class="field-label" for="reg-usuario">Usuário</label>
 				<input id="reg-usuario" name="usuario" type="text" autocomplete="off" placeholder="Escolha um usuário" minlength="3" maxlength="32" required>
+				<p class="password-requirements">O usuário não pode conter termos ofensivos.</p>
 
 				<label class="field-label" for="reg-data-nascimento">Data de nascimento</label>
 				<input id="reg-data-nascimento" name="dataNascimento" type="date" autocomplete="bday" required>
@@ -50,7 +51,7 @@
 
 				<label class="field-label" for="reg-senha">Senha</label>
 				<input id="reg-senha" name="senha" type="password" autocomplete="new-password" minlength="6" maxlength="128" aria-describedby="password-requirements" placeholder="Mínimo de 6 caracteres" required>
-				<p class="password-requirements" id="password-requirements">Use ao menos 6 caracteres, uma letra maiúscula e um caractere especial.</p>
+				<p class="password-requirements" id="password-requirements">Use ao menos 6 caracteres, uma letra maiúscula e um caractere especial. Login e senha não podem conter termos ofensivos.</p>
 
 				<button class="submit-button" type="submit">Cadastrar usuário <span aria-hidden="true">→</span></button>
 				<p class="form-message" id="register-message" role="status" aria-live="polite"></p>

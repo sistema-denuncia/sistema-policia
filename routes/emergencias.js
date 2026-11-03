@@ -286,6 +286,13 @@ router.get('/:id', async (req, res, next) => {
 });
 
 router.patch('/:id/status', async (req, res, next) => {
+  if (req.usuario.cargo !== 'AGENTE') {
+    return res.status(403).json({
+      sucesso: false,
+      mensagem: 'Somente agentes podem atualizar ocorrências.',
+    });
+  }
+
   const { status, observacoes } = req.body;
 
   if (!STATUS_VALIDOS.includes(status)) {

@@ -11,6 +11,7 @@ const { pool: mysqlPool } = require('./database/mysql');
 const emergenciasRoute = require('./routes/emergencias');
 const usuariosRoute = require('./routes/usuarios');
 const { SELECT_DENUNCIA, formatarAlerta } = require('./lib/alertas');
+const { contemTermoOfensivo, validarSenha } = require('./lib/credential-policy');
 
 const app = express();
 const server = http.createServer(app);
@@ -178,6 +179,9 @@ app.post('/api/auth/supervisor', async (req, res, next) => {
   if (!login || !senha) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe usuário e senha.' });
   }
+  if (contemTermoOfensivo(login) || contemTermoOfensivo(senha)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Login e senha não podem conter termos ofensivos.' });
+  }
 
   try {
     const [supervisores] = await mysqlPool.execute(
@@ -213,6 +217,9 @@ app.post('/api/auth/login', async (req, res, next) => {
   const cargoEsperado = req.body?.cargo;
   if (!usuarioLogin || !senha || !['ADMINISTRADOR', 'AGENTE'].includes(cargoEsperado)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe usuário, senha e um cargo válido.' });
+  }
+  if (contemTermoOfensivo(usuarioLogin) || contemTermoOfensivo(senha)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Login e senha não podem conter termos ofensivos.' });
   }
 
   try {
@@ -495,14 +502,18 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   if (usuario.length < 3 || usuario.length > 32) {
     return res.status(400).json({ sucesso: false, mensagem: 'O usuário deve ter de 3 a 32 caracteres.' });
   }
+  if (contemTermoOfensivo(usuario)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'O usuário não pode conter termos ofensivos.' });
+  }
   if (!dataValida(dataNascimento) || dataNascimento > new Date().toISOString().slice(0, 10)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe uma data de nascimento válida.' });
   }
   if (!['ADMINISTRADOR', 'AGENTE'].includes(cargo)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Cargo inválido.' });
   }
-  if (senha.length < 6 || !/[A-Z]/.test(senha) || !/[^A-Za-z0-9]/.test(senha)) {
-    return res.status(400).json({ sucesso: false, mensagem: 'A senha deve ter ao menos 6 caracteres, uma letra maiúscula e um caractere especial.' });
+  const erroSenha = validarSenha(senha);
+  if (erroSenha) {
+    return res.status(400).json({ sucesso: false, mensagem: erroSenha });
   }
 
   try {
