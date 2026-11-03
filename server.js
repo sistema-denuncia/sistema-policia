@@ -216,7 +216,7 @@ app.post('/api/auth/login', async (req, res, next) => {
       'SELECT id, nome, usuario, cargo, senha_hash, senha_salt FROM atendentes WHERE usuario = ? AND ativo = 1 LIMIT 1',
       [usuarioLogin]
     );
-    const row = usuarios[0];
+    const row = rows[0];
     if (!row || !/^[\da-f]{32}$/i.test(row.senha_salt || '')
       || !/^[\da-f]{128}$/i.test(row.senha_hash || '')) {
       return res.status(401).json({ sucesso: false, mensagem: 'Usuário ou senha inválidos.' });
