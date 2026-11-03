@@ -138,6 +138,7 @@ async function garantirTabelaAtendentes() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       nome VARCHAR(100) NOT NULL,
       usuario VARCHAR(100) NOT NULL UNIQUE,
+      data_nascimento DATE NULL,
       senha_hash CHAR(128) NULL,
       senha_salt CHAR(32) NULL,
       cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',
@@ -153,6 +154,9 @@ async function garantirTabelaAtendentes() {
   }
   if (!columnNames.has('senha_salt')) {
     await mysqlPool.query('ALTER TABLE atendentes ADD COLUMN senha_salt CHAR(32) NULL');
+  }
+  if (!columnNames.has('data_nascimento')) {
+    await mysqlPool.query('ALTER TABLE atendentes ADD COLUMN data_nascimento DATE NULL');
   }
   const legacyPasswordColumn = columns.find((column) => column.Field === 'senha');
   if (legacyPasswordColumn && legacyPasswordColumn.Null === 'NO') {
@@ -324,22 +328,164 @@ function validarApiKey(req, res, next) {
   next();
 }
 app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
+  if ((req.query.cargo !== undefined && typeof req.query.cargo !== 'string')
+    || (req.query.data !== undefined && typeof req.query.data !== 'string')) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe filtros válidos.' });
+  }
+
+  const cargo = typeof req.query.cargo === 'string' ? req.query.cargo : '';
+  const data = req.query.data;
+
+  if (cargo && !['ADMINISTRADOR', 'AGENTE'].includes(cargo)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Cargo inválido.' });
+  }
+
+  const filtros = [];
+  const parametros = [];
+  if (cargo === 'AGENTE') {
+    filtros.push("LOWER(TRIM(cargo)) IN ('atendente', 'agente')");
+  } else if (cargo === 'ADMINISTRADOR') {
+    filtros.push("LOWER(TRIM(cargo)) IN ('administrador', 'supervisor')");
+  }
+
+  if (data !== undefined && data !== '') {
+    const partesData = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(data.trim());
+    const dataIso = partesData
+      ? `${partesData[3]}-${partesData[2]}-${partesData[1]}`
+      : '';
+    if (!dataValida(dataIso)) {
+      return res.status(400).json({ sucesso: false, mensagem: 'Informe a data no formato DD/MM/AAAA.' });
+    }
+
+    filtros.push('data_nascimento = ?');
+    parametros.push(dataIso);
+  }
+
   try {
-    const [atendentes] = await mysqlPool.execute('SELECT id, nome, usuario, cargo, ativo, criado_em FROM atendentes ORDER BY nome');
+    const where = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+    const [atendentes] = await mysqlPool.execute(
+      `SELECT id, nome, usuario, cargo, ativo,
+              DATE_FORMAT(data_nascimento, '%Y-%m-%d') AS dataNascimento, criado_em
+       FROM atendentes ${where}
+       ORDER BY nome`,
+      parametros
+    );
     const usuarios = atendentes.map((row) => ({
       ...usuarioPublico(row),
+      dataNascimento: row.dataNascimento,
       ativo: Boolean(row.ativo),
       criadoEm: row.criado_em,
     }));
-    res.json({ sucesso: true, usuarios });
+    return res.json({ sucesso: true, usuarios });
   } catch (err) {
-    next(err);
+    return next(err);
+  }
+});
+
+app.get('/api/admin/estatisticas', requireAuth, requireAdmin, async (req, res, next) => {
+  const periodo = req.query.periodo;
+  const data = req.query.data;
+  if ((periodo !== undefined && typeof periodo !== 'string')
+    || (data !== undefined && typeof data !== 'string')) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe um período válido.' });
+  }
+
+  const periodoFinal = periodo || 'mes';
+  const dataAtual = new Date();
+  const anoAtual = dataAtual.getFullYear();
+  const dataPadrao = periodoFinal === 'ano'
+    ? String(anoAtual)
+    : `${anoAtual}-${String(dataAtual.getMonth() + 1).padStart(2, '0')}`;
+  const dataFinal = data || dataPadrao;
+  let inicio;
+  let fim;
+  let formatoSerie;
+
+  if (periodoFinal === 'mes') {
+    const correspondencia = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(dataFinal);
+    if (!correspondencia || Number(correspondencia[1]) < 1000
+      || Number(correspondencia[1]) > anoAtual) {
+      return res.status(400).json({ sucesso: false, mensagem: 'Selecione um mês válido.' });
+    }
+    const ano = Number(correspondencia[1]);
+    const mes = Number(correspondencia[2]);
+    inicio = `${dataFinal}-01`;
+    fim = new Date(Date.UTC(ano, mes, 1)).toISOString().slice(0, 10);
+    formatoSerie = '%Y-%m-%d';
+  } else if (periodoFinal === 'ano' && /^\d{4}$/.test(dataFinal)
+    && Number(dataFinal) >= 1000 && Number(dataFinal) <= anoAtual) {
+    inicio = `${dataFinal}-01-01`;
+    fim = `${Number(dataFinal) + 1}-01-01`;
+    formatoSerie = '%Y-%m';
+  } else {
+    return res.status(400).json({
+      sucesso: false,
+      mensagem: periodoFinal === 'ano' ? 'Selecione um ano válido.' : 'Período inválido.',
+    });
+  }
+
+  const parametros = [`${inicio} 00:00:00`, `${fim} 00:00:00`];
+  const numeroIntervalos = periodoFinal === 'mes'
+    ? new Date(Date.UTC(Number(inicio.slice(0, 4)), Number(inicio.slice(5, 7)), 0)).getUTCDate()
+    : 12;
+
+  try {
+    const [resumoRows] = await mysqlPool.execute(`
+      SELECT COUNT(*) AS total,
+        COALESCE(SUM(status IN ('ATIVO', 'EM_ATENDIMENTO')), 0) AS abertos,
+        COALESCE(SUM(status = 'RESOLVIDO'), 0) AS resolvidos,
+        COALESCE(SUM(status = 'FALSO_ALARME'), 0) AS falsosAlarmes,
+        COALESCE(SUM(prioridade = 'CRITICA'), 0) AS criticos
+      FROM denuncias
+      WHERE criado_em >= ? AND criado_em < ?
+    `, parametros);
+    const [statusRows] = await mysqlPool.execute(
+      'SELECT status, COUNT(*) AS total FROM denuncias WHERE criado_em >= ? AND criado_em < ? GROUP BY status',
+      parametros
+    );
+    const [prioridadeRows] = await mysqlPool.execute(
+      'SELECT prioridade, COUNT(*) AS total FROM denuncias WHERE criado_em >= ? AND criado_em < ? GROUP BY prioridade',
+      parametros
+    );
+    const [serieRows] = await mysqlPool.execute(
+      `SELECT DATE_FORMAT(criado_em, '${formatoSerie}') AS periodo, COUNT(*) AS total
+       FROM denuncias
+       WHERE criado_em >= ? AND criado_em < ?
+       GROUP BY DATE_FORMAT(criado_em, '${formatoSerie}')`,
+      parametros
+    );
+
+    const serieRegistrada = new Map(serieRows.map((row) => [row.periodo, Number(row.total)]));
+    const serie = Array.from({ length: numeroIntervalos }, (_, indice) => {
+      const dataPeriodo = periodoFinal === 'mes'
+        ? new Date(Date.UTC(Number(inicio.slice(0, 4)), Number(inicio.slice(5, 7)) - 1, indice + 1))
+        : new Date(Date.UTC(Number(inicio.slice(0, 4)), indice, 1));
+      const periodoFormatado = periodoFinal === 'mes'
+        ? dataPeriodo.toISOString().slice(0, 10)
+        : dataPeriodo.toISOString().slice(0, 7);
+      return { periodo: periodoFormatado, total: serieRegistrada.get(periodoFormatado) || 0 };
+    });
+
+    return res.json({
+      sucesso: true,
+      periodo: periodoFinal,
+      data: dataFinal,
+      resumo: Object.fromEntries(
+        Object.entries(resumoRows[0]).map(([chave, valor]) => [chave, Number(valor)])
+      ),
+      porStatus: statusRows.map((row) => ({ status: row.status, total: Number(row.total) })),
+      porPrioridade: prioridadeRows.map((row) => ({ prioridade: row.prioridade, total: Number(row.total) })),
+      serie,
+    });
+  } catch (err) {
+    return next(err);
   }
 });
 
 app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next) => {
   const nome = typeof req.body?.nome === 'string' ? req.body.nome.trim() : '';
   const usuario = typeof req.body?.usuario === 'string' ? req.body.usuario.trim().toLowerCase() : '';
+  const dataNascimento = typeof req.body?.dataNascimento === 'string' ? req.body.dataNascimento : '';
   const cargo = req.body?.cargo;
   const senha = typeof req.body?.senha === 'string' ? req.body.senha : '';
 
@@ -348,6 +494,9 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   }
   if (usuario.length < 3 || usuario.length > 32) {
     return res.status(400).json({ sucesso: false, mensagem: 'O usuário deve ter de 3 a 32 caracteres.' });
+  }
+  if (!dataValida(dataNascimento) || dataNascimento > new Date().toISOString().slice(0, 10)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe uma data de nascimento válida.' });
   }
   if (!['ADMINISTRADOR', 'AGENTE'].includes(cargo)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Cargo inválido.' });
@@ -360,10 +509,13 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
     const [result] = await mysqlPool.execute(
-      'INSERT INTO atendentes (nome, usuario, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?)',
-      [nome, usuario, cargoAtendente(cargo), hash.toString('hex'), salt]
+      'INSERT INTO atendentes (nome, usuario, data_nascimento, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?, ?)',
+      [nome, usuario, dataNascimento, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
-    res.status(201).json({ sucesso: true, usuario: { id: result.insertId, nome, usuario, cargo } });
+    res.status(201).json({
+      sucesso: true,
+      usuario: { id: result.insertId, nome, usuario, dataNascimento, cargo },
+    });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ sucesso: false, mensagem: 'Este usuário já está cadastrado.' });

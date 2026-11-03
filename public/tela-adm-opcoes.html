@@ -20,8 +20,9 @@
 
 		<nav class="admin-tabs" aria-label="Opções administrativas">
 			<button class="admin-tab" id="tab-cadastro" type="button" aria-expanded="false" aria-controls="panel-cadastro" data-admin-tab="panel-cadastro">CADASTRAR USUARIO</button>
-			<button class="admin-tab" id="tab-usuarios" type="button" aria-expanded="false" aria-controls="panel-usuarios" data-admin-tab="panel-usuarios">USUARIOS CADASTRADOS</button>
+			<button class="admin-tab" id="tab-usuarios" type="button" aria-expanded="false" aria-controls="panel-usuarios" data-admin-tab="panel-usuarios">USUÁRIOS CADASTRADOS</button>
 			<button class="admin-tab" id="tab-historico" type="button" aria-expanded="false" aria-controls="panel-historico" data-admin-tab="panel-historico">HISTORICO DE EMERGENCIAS</button>
+			<button class="admin-tab" id="tab-estatisticas" type="button" aria-expanded="false" aria-controls="panel-estatisticas" data-admin-tab="panel-estatisticas">ESTATÍSTICAS</button>
 			<a class="admin-tab" href="index.html">TELA DE ACIONAMENTO</a>
 		</nav>
 
@@ -36,6 +37,9 @@
 
 				<label class="field-label" for="reg-usuario">Usuário</label>
 				<input id="reg-usuario" name="usuario" type="text" autocomplete="off" placeholder="Escolha um usuário" minlength="3" maxlength="32" required>
+
+				<label class="field-label" for="reg-data-nascimento">Data de nascimento</label>
+				<input id="reg-data-nascimento" name="dataNascimento" type="date" autocomplete="bday" required>
 
 				<label class="field-label" for="reg-cargo">Cargo</label>
 				<select id="reg-cargo" name="cargo" required>
@@ -56,12 +60,65 @@
 		<section class="admin-panel" id="panel-usuarios" aria-labelledby="tab-usuarios" hidden>
 			<p class="form-kicker">CONTROLE DE ACESSO</p>
 			<h2>Usuários cadastrados</h2>
+			<form class="users-filters" id="users-filters">
+				<div class="user-filter-field">
+					<label class="field-label" for="users-cargo">Filtrar por cargo</label>
+					<select id="users-cargo" name="cargo">
+						<option value="">Todos os cargos</option>
+						<option value="ADMINISTRADOR">Administrador</option>
+						<option value="AGENTE">Agente</option>
+					</select>
+				</div>
+				<div class="user-filter-field">
+					<label class="field-label" for="users-date">Data de nascimento</label>
+					<input id="users-date" name="data" type="date" autocomplete="off" aria-label="Selecione a data de nascimento no calendário">
+				</div>
+				<button class="submit-button" type="submit">Buscar</button>
+				<button class="history-clear" id="users-clear" type="button">Limpar filtro</button>
+			</form>
 			<p class="admin-list-message" id="users-message" role="status" aria-live="polite"></p>
 			<div class="admin-table-wrap">
 				<table class="admin-table">
-					<thead><tr><th scope="col">Nome</th><th scope="col">Usuário</th><th scope="col">Cargo</th></tr></thead>
+					<thead><tr><th scope="col">Nome</th><th scope="col">Usuário</th><th scope="col">Cargo</th><th scope="col">Data de nascimento</th></tr></thead>
 					<tbody id="users-list"></tbody>
 				</table>
+			</div>
+		</section>
+
+		<section class="admin-panel" id="panel-estatisticas" aria-labelledby="tab-estatisticas" hidden>
+			<p class="form-kicker">VISÃO GERAL</p>
+			<h2>Estatísticas de emergências</h2>
+			<form class="stats-filters" id="stats-filters">
+				<div class="user-filter-field">
+					<label class="field-label" for="stats-period">Período</label>
+					<select id="stats-period" name="periodo">
+						<option value="mes">Mês</option>
+						<option value="ano">Ano</option>
+					</select>
+				</div>
+				<div class="user-filter-field">
+					<label class="field-label" for="stats-date" id="stats-date-label">Mês</label>
+					<input id="stats-date" name="data" type="month" required>
+				</div>
+				<button class="submit-button" type="submit">Aplicar filtro</button>
+			</form>
+			<p class="admin-list-message" id="stats-message" role="status" aria-live="polite"></p>
+			<div class="stats-summary" id="stats-summary"></div>
+			<div class="stats-charts">
+				<section class="stats-card" aria-labelledby="stats-status-title">
+					<h3 id="stats-status-title">Emergências por status</h3>
+					<div class="stats-bars" id="stats-status"></div>
+				</section>
+				<section class="stats-card" aria-labelledby="stats-priority-title">
+					<h3 id="stats-priority-title">Emergências por prioridade</h3>
+					<div class="stats-bars" id="stats-priority"></div>
+				</section>
+				<section class="stats-card stats-card-wide" id="stats-series-card" aria-labelledby="stats-days-title" hidden>
+					<h3 id="stats-days-title">Emergências no período</h3>
+					<div class="stats-chart-scroll">
+						<div class="stats-daily-bars" id="stats-days"></div>
+					</div>
+				</section>
 			</div>
 		</section>
 
@@ -69,14 +126,34 @@
 			<p class="form-kicker">CONSULTA DE REGISTROS</p>
 			<h2>Histórico de emergências</h2>
 			<form class="history-filters" id="history-filters">
-				<label class="field-label" for="history-period">Filtrar por</label>
-				<select id="history-period" name="periodo">
-					<option value="dia">Dia</option>
-					<option value="mes">Mês</option>
-					<option value="ano">Ano</option>
-				</select>
-				<label class="field-label" for="history-date" id="history-date-label">Data</label>
-				<input id="history-date" name="data" type="date" required>
+				<div class="history-filter-field">
+					<label class="field-label" for="history-start-date">Data inicial</label>
+					<input id="history-start-date" name="inicio" type="date" required>
+				</div>
+				<div class="history-filter-field">
+					<label class="field-label" for="history-end-date">Data final</label>
+					<input id="history-end-date" name="fim" type="date" required>
+				</div>
+				<div class="history-filter-field">
+					<label class="field-label" for="history-status">Status</label>
+					<select id="history-status" name="status">
+						<option value="">Todos os status</option>
+						<option value="ATIVO">Ativo</option>
+						<option value="EM_ATENDIMENTO">Em atendimento</option>
+						<option value="RESOLVIDO">Resolvido</option>
+						<option value="FALSO_ALARME">Falso alarme</option>
+					</select>
+				</div>
+				<div class="history-filter-field">
+					<label class="field-label" for="history-priority">Prioridade</label>
+					<select id="history-priority" name="prioridade">
+						<option value="">Todas as prioridades</option>
+						<option value="BAIXA">Baixa</option>
+						<option value="MEDIA">Média</option>
+						<option value="ALTA">Alta</option>
+						<option value="CRITICA">Crítica</option>
+					</select>
+				</div>
 				<button class="submit-button" type="submit">Buscar</button>
 				<button class="history-clear" id="history-clear" type="button">Limpar filtro</button>
 			</form>

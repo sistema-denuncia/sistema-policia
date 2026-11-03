@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS atendentes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(100) NOT NULL,
     usuario VARCHAR(100) NOT NULL UNIQUE,
+    data_nascimento DATE NULL,
     senha_hash CHAR(128) NOT NULL,
     senha_salt CHAR(32) NOT NULL,
     cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',

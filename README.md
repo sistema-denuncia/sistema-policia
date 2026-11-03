@@ -10,6 +10,9 @@ Botão de emergência
   │ POST /api/emergencia + X-API-Key
   ▼
 Backend da polícia (porta 3001)
+  │
+  ├── grava no MySQL
+  └── emite novo-alerta via Socket.IO
   ├── valida e grava o acionamento no MySQL
   └── emite o alerta via Socket.IO
             │
