@@ -18,9 +18,7 @@ async function all(sql, params = []) {
 }
 
 /**
- * Inicializa o banco — no SQLite criávamos as tabelas aqui,
- * mas no MySQL elas já existem via banco.sql (docker-entrypoint-initdb.d).
- * Mantemos a função para não quebrar a chamada em server.js.
+ * Garante a tabela de alertas em instalações novas e em volumes MySQL existentes.
  */
 async function inicializarBanco() {
   await testarConexao();

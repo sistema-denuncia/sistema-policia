@@ -197,14 +197,68 @@ router.post('/', emergenciaLimiter, async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const status = req.query.status;
-    const { periodo, data } = req.query;
+    const prioridade = req.query.prioridade;
+    const data = req.query.data;
+    const inicio = req.query.inicio;
+    const fim = req.query.fim;
+    if ((status !== undefined && typeof status !== 'string')
+      || (prioridade !== undefined && typeof prioridade !== 'string')
+      || (data !== undefined && typeof data !== 'string')
+      || (inicio !== undefined && typeof inicio !== 'string')
+      || (fim !== undefined && typeof fim !== 'string')) {
+      return res.status(400).json({ sucesso: false, mensagem: 'Informe filtros válidos.' });
+    }
+    if (status && !STATUS_VALIDOS.includes(status)) {
+      return res.status(400).json({ sucesso: false, mensagem: 'Status inválido.' });
+    }
+    if (prioridade && !PRIORIDADES_VALIDAS.includes(prioridade)) {
+      return res.status(400).json({ sucesso: false, mensagem: 'Prioridade inválida.' });
+    }
+
     const params = [];
+    const filtros = [];
     let sql = SELECT_DENUNCIA;
 
-    if (status && STATUS_VALIDOS.includes(status)) {
-      sql += ' WHERE d.status = ?';
+    if (status) {
+      filtros.push('d.status = ?');
       params.push(status);
     }
+    if (prioridade) {
+      filtros.push('d.prioridade = ?');
+      params.push(prioridade);
+    }
+
+    const validarData = (valor) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(valor || '')) return false;
+      const [ano, mes, dia] = valor.split('-').map(Number);
+      const dataUtc = new Date(Date.UTC(ano, mes - 1, dia));
+      return dataUtc.toISOString().slice(0, 10) === valor;
+    };
+
+    if (data !== undefined && data !== '') {
+      if (inicio || fim || !validarData(data)) {
+        return res.status(400).json({ sucesso: false, mensagem: 'Informe uma data válida.' });
+      }
+
+      const dataUtc = new Date(`${data}T00:00:00.000Z`);
+      const proximoDia = new Date(dataUtc);
+      proximoDia.setUTCDate(proximoDia.getUTCDate() + 1);
+      filtros.push('d.criado_em >= ? AND d.criado_em < ?');
+      params.push(`${data} 00:00:00`, `${proximoDia.toISOString().slice(0, 10)} 00:00:00`);
+    }
+
+    if ((inicio !== undefined && inicio !== '') || (fim !== undefined && fim !== '')) {
+      if (!inicio || !fim || !validarData(inicio) || !validarData(fim) || inicio > fim) {
+        return res.status(400).json({ sucesso: false, mensagem: 'Informe um período válido, com data inicial e final.' });
+      }
+
+      const diaSeguinteFim = new Date(`${fim}T00:00:00.000Z`);
+      diaSeguinteFim.setUTCDate(diaSeguinteFim.getUTCDate() + 1);
+      filtros.push('d.criado_em >= ? AND d.criado_em < ?');
+      params.push(`${inicio} 00:00:00`, `${diaSeguinteFim.toISOString().slice(0, 10)} 00:00:00`);
+    }
+
+    if (filtros.length) sql += ` WHERE ${filtros.join(' AND ')}`;
 
     sql += status === 'ATIVO'
       ? ' ORDER BY d.criado_em DESC, d.id DESC'
