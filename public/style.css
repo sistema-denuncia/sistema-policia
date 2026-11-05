@@ -284,6 +284,28 @@ button { font: inherit; }
   font:inherit;
   font-size:13px;
 }
+#reg-data-nascimento::-webkit-calendar-picker-indicator { filter:invert(1); opacity:1; cursor:pointer; }
+.password-input-wrap { position:relative; }
+.form-view .password-input-wrap input { padding-right:46px; }
+.password-toggle {
+  position:absolute;
+  top:50%;
+  right:8px;
+  display:grid;
+  width:32px;
+  height:32px;
+  place-items:center;
+  transform:translateY(-50%);
+  border:0;
+  border-radius:5px;
+  color:var(--muted);
+  background:transparent;
+  cursor:pointer;
+}
+.password-toggle:hover { color:var(--text); background:rgba(255,255,255,.05); }
+.password-toggle:focus-visible { outline:2px solid var(--cyan); outline-offset:1px; }
+.password-toggle-icon { width:18px; height:18px; }
+.password-toggle-icon[hidden] { display:none; }
 .form-view input::placeholder { color:var(--muted-2); }
 .form-view input:focus,
 .form-view select:focus { border-color:var(--cyan); box-shadow:0 0 0 3px rgba(59,199,255,.1); }

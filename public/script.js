@@ -10,6 +10,19 @@ function mensagemFalhaLogin(error) {
         : error.message;
 }
 
+document.querySelectorAll('[data-password-toggle]').forEach((botao) => {
+    botao.addEventListener('click', () => {
+        const campo = document.getElementById(botao.getAttribute('aria-controls'));
+        const mostrarSenha = campo.type === 'password';
+        campo.type = mostrarSenha ? 'text' : 'password';
+        botao.setAttribute('aria-label', mostrarSenha ? 'Ocultar senha' : 'Mostrar senha');
+        botao.setAttribute('aria-pressed', String(mostrarSenha));
+        botao.querySelectorAll('.password-toggle-icon').forEach((icone) => {
+            icone.hidden = !icone.hidden;
+        });
+    });
+});
+
 async function autenticarAdministrador(login, senha) {
     try {
         return await window.policiaApi.post('/api/auth/supervisor', { login, senha });

@@ -37,9 +37,17 @@
 
 				<label class="field-label" for="reg-usuario">Usuário</label>
 				<input id="reg-usuario" name="usuario" type="text" autocomplete="off" placeholder="Escolha um usuário" minlength="3" maxlength="32" required>
+				<p class="password-requirements">O usuário não pode conter termos ofensivos.</p>
 
 				<label class="field-label" for="reg-data-nascimento">Data de nascimento</label>
 				<input id="reg-data-nascimento" name="dataNascimento" type="date" autocomplete="bday" required>
+
+				<label class="field-label" for="reg-genero">Gênero</label>
+				<select id="reg-genero" name="genero" required>
+					<option value="" disabled selected hidden>Selecione o gênero</option>
+					<option value="MASCULINO">Masculino</option>
+					<option value="FEMININO">Feminino</option>
+				</select>
 
 				<label class="field-label" for="reg-cargo">Cargo</label>
 				<select id="reg-cargo" name="cargo" required>
@@ -50,7 +58,7 @@
 
 				<label class="field-label" for="reg-senha">Senha</label>
 				<input id="reg-senha" name="senha" type="password" autocomplete="new-password" minlength="6" maxlength="128" aria-describedby="password-requirements" placeholder="Mínimo de 6 caracteres" required>
-				<p class="password-requirements" id="password-requirements">Use ao menos 6 caracteres, uma letra maiúscula e um caractere especial.</p>
+				<p class="password-requirements" id="password-requirements">Use ao menos 6 caracteres, uma letra maiúscula e um caractere especial. Login e senha não podem conter termos ofensivos.</p>
 
 				<button class="submit-button" type="submit">Cadastrar usuário <span aria-hidden="true">→</span></button>
 				<p class="form-message" id="register-message" role="status" aria-live="polite"></p>
@@ -79,7 +87,7 @@
 			<p class="admin-list-message" id="users-message" role="status" aria-live="polite"></p>
 			<div class="admin-table-wrap">
 				<table class="admin-table">
-					<thead><tr><th scope="col">Nome</th><th scope="col">Usuário</th><th scope="col">Cargo</th><th scope="col">Data de nascimento</th></tr></thead>
+					<thead><tr><th scope="col">Nome</th><th scope="col">Usuário</th><th scope="col">Gênero</th><th scope="col">Cargo</th><th scope="col">Data de nascimento</th></tr></thead>
 					<tbody id="users-list"></tbody>
 				</table>
 			</div>
@@ -169,6 +177,6 @@
 	</main>
 	<script src="api.js"></script>
 	<script src="script.js"></script>
-	<script src="admin.js"></script>
+	<script src="admin.js?v=genero-1"></script>
 </body>
 </html>
