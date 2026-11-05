@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS atendentes (
     nome VARCHAR(100) NOT NULL,
     usuario VARCHAR(100) NOT NULL UNIQUE,
     data_nascimento DATE NULL,
+    genero ENUM('MASCULINO', 'FEMININO') NULL,
     senha_hash CHAR(128) NOT NULL,
     senha_salt CHAR(32) NOT NULL,
     cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',

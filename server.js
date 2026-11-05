@@ -140,6 +140,7 @@ async function garantirTabelaAtendentes() {
       nome VARCHAR(100) NOT NULL,
       usuario VARCHAR(100) NOT NULL UNIQUE,
       data_nascimento DATE NULL,
+      genero ENUM('MASCULINO', 'FEMININO') NULL,
       senha_hash CHAR(128) NULL,
       senha_salt CHAR(32) NULL,
       cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',
@@ -158,6 +159,9 @@ async function garantirTabelaAtendentes() {
   }
   if (!columnNames.has('data_nascimento')) {
     await mysqlPool.query('ALTER TABLE atendentes ADD COLUMN data_nascimento DATE NULL');
+  }
+  if (!columnNames.has('genero')) {
+    await mysqlPool.query("ALTER TABLE atendentes ADD COLUMN genero ENUM('MASCULINO', 'FEMININO') NULL");
   }
   const legacyPasswordColumn = columns.find((column) => column.Field === 'senha');
   if (legacyPasswordColumn && legacyPasswordColumn.Null === 'NO') {
@@ -371,7 +375,7 @@ app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next)
   try {
     const where = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
     const [atendentes] = await mysqlPool.execute(
-      `SELECT id, nome, usuario, cargo, ativo,
+      `SELECT id, nome, usuario, genero, cargo, ativo,
               DATE_FORMAT(data_nascimento, '%Y-%m-%d') AS dataNascimento, criado_em
        FROM atendentes ${where}
        ORDER BY nome`,
@@ -379,6 +383,7 @@ app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next)
     );
     const usuarios = atendentes.map((row) => ({
       ...usuarioPublico(row),
+      genero: row.genero,
       dataNascimento: row.dataNascimento,
       ativo: Boolean(row.ativo),
       criadoEm: row.criado_em,
@@ -493,6 +498,7 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   const nome = typeof req.body?.nome === 'string' ? req.body.nome.trim() : '';
   const usuario = typeof req.body?.usuario === 'string' ? req.body.usuario.trim().toLowerCase() : '';
   const dataNascimento = typeof req.body?.dataNascimento === 'string' ? req.body.dataNascimento : '';
+  const genero = req.body?.genero;
   const cargo = req.body?.cargo;
   const senha = typeof req.body?.senha === 'string' ? req.body.senha : '';
 
@@ -508,6 +514,9 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   if (!dataValida(dataNascimento) || dataNascimento > new Date().toISOString().slice(0, 10)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe uma data de nascimento válida.' });
   }
+  if (!['MASCULINO', 'FEMININO'].includes(genero)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Selecione um gênero válido.' });
+  }
   if (!['ADMINISTRADOR', 'AGENTE'].includes(cargo)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Cargo inválido.' });
   }
@@ -520,12 +529,12 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
     const [result] = await mysqlPool.execute(
-      'INSERT INTO atendentes (nome, usuario, data_nascimento, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?, ?)',
-      [nome, usuario, dataNascimento, cargoAtendente(cargo), hash.toString('hex'), salt]
+      'INSERT INTO atendentes (nome, usuario, data_nascimento, genero, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [nome, usuario, dataNascimento, genero, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
     res.status(201).json({
       sucesso: true,
-      usuario: { id: result.insertId, nome, usuario, dataNascimento, cargo },
+      usuario: { id: result.insertId, nome, usuario, dataNascimento, genero, cargo },
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {

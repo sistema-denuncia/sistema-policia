@@ -53,7 +53,7 @@ if (adminApp) {
             if (!usuarios.length) {
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
-                cell.colSpan = 4;
+                cell.colSpan = 5;
                 cell.textContent = 'Nenhum usuário encontrado com esses filtros.';
                 row.appendChild(cell);
                 usersList.appendChild(row);
@@ -63,7 +63,11 @@ if (adminApp) {
                     const dataNascimento = typeof usuario.dataNascimento === 'string'
                         ? usuario.dataNascimento.split('-').reverse().join('/')
                         : '—';
-                    [usuario.nome, usuario.usuario, usuario.cargo, dataNascimento].forEach((valor) => {
+                    const genero = {
+                        MASCULINO: 'Masculino',
+                        FEMININO: 'Feminino',
+                    }[usuario.genero] || 'Não informado';
+                    [usuario.nome, usuario.usuario, genero, usuario.cargo, dataNascimento].forEach((valor) => {
                         const cell = document.createElement('td');
                         cell.textContent = valor || '—';
                         row.appendChild(cell);

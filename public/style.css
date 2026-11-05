@@ -284,6 +284,7 @@ button { font: inherit; }
   font:inherit;
   font-size:13px;
 }
+#reg-data-nascimento::-webkit-calendar-picker-indicator { filter:invert(1); opacity:1; cursor:pointer; }
 .password-input-wrap { position:relative; }
 .form-view .password-input-wrap input { padding-right:46px; }
 .password-toggle {

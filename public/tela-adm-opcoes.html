@@ -42,6 +42,13 @@
 				<label class="field-label" for="reg-data-nascimento">Data de nascimento</label>
 				<input id="reg-data-nascimento" name="dataNascimento" type="date" autocomplete="bday" required>
 
+				<label class="field-label" for="reg-genero">Gênero</label>
+				<select id="reg-genero" name="genero" required>
+					<option value="" disabled selected hidden>Selecione o gênero</option>
+					<option value="MASCULINO">Masculino</option>
+					<option value="FEMININO">Feminino</option>
+				</select>
+
 				<label class="field-label" for="reg-cargo">Cargo</label>
 				<select id="reg-cargo" name="cargo" required>
 					<option value="" disabled selected hidden>Selecione seu cargo</option>
@@ -80,7 +87,7 @@
 			<p class="admin-list-message" id="users-message" role="status" aria-live="polite"></p>
 			<div class="admin-table-wrap">
 				<table class="admin-table">
-					<thead><tr><th scope="col">Nome</th><th scope="col">Usuário</th><th scope="col">Cargo</th><th scope="col">Data de nascimento</th></tr></thead>
+					<thead><tr><th scope="col">Nome</th><th scope="col">Usuário</th><th scope="col">Gênero</th><th scope="col">Cargo</th><th scope="col">Data de nascimento</th></tr></thead>
 					<tbody id="users-list"></tbody>
 				</table>
 			</div>
@@ -170,6 +177,6 @@
 	</main>
 	<script src="api.js"></script>
 	<script src="script.js"></script>
-	<script src="admin.js"></script>
+	<script src="admin.js?v=genero-1"></script>
 </body>
 </html>
