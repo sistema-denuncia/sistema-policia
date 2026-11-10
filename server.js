@@ -76,6 +76,20 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireAgent(req, res, next) {
+  if (req.usuario.cargo !== 'AGENTE') {
+    return res.status(403).json({ sucesso: false, mensagem: 'Acesso restrito aos agentes.' });
+  }
+  next();
+}
+
+function requireAdminOrAgent(req, res, next) {
+  if (!['ADMINISTRADOR', 'AGENTE'].includes(req.usuario.cargo)) {
+    return res.status(403).json({ sucesso: false, mensagem: 'Acesso restrito à equipe operacional.' });
+  }
+  next();
+}
+
 function usuarioPublico(row) {
   return {
     id: row.id,
@@ -167,6 +181,23 @@ async function garantirTabelaAtendentes() {
   if (legacyPasswordColumn && legacyPasswordColumn.Null === 'NO') {
     await mysqlPool.query('ALTER TABLE atendentes MODIFY COLUMN senha VARCHAR(100) NULL');
   }
+}
+
+async function garantirTabelaAtendimentosOperacionais() {
+  await mysqlPool.execute(`
+    CREATE TABLE IF NOT EXISTS atendimentos_operacionais (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      denuncia_id INT NOT NULL,
+      atendente_id INT NOT NULL,
+      assumida_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      encerrada_em DATETIME NULL,
+      resultado ENUM('RESOLVIDO', 'FALSO_ALARME', 'TRANSFERIDO') NULL,
+      INDEX idx_atendimentos_periodo (assumida_em, atendente_id),
+      INDEX idx_atendimentos_denuncia (denuncia_id, encerrada_em),
+      FOREIGN KEY (denuncia_id) REFERENCES denuncias(id),
+      FOREIGN KEY (atendente_id) REFERENCES atendentes(id)
+    )
+  `);
 }
 
 io.use((socket, next) => {
@@ -324,6 +355,126 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ sucesso: true, usuario: req.usuario });
 });
 
+app.get('/api/estatisticas-operacionais', requireAuth, requireAdminOrAgent, async (req, res, next) => {
+  const periodo = req.query.periodo;
+  const data = req.query.data;
+  if ((periodo !== undefined && typeof periodo !== 'string')
+    || (data !== undefined && typeof data !== 'string')) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe um período válido.' });
+  }
+
+  const periodoFinal = periodo || 'mes';
+  const hoje = new Date();
+  const dataHoje = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+  const mesAtual = dataHoje.slice(0, 7);
+  const dataPadrao = periodoFinal === 'dia'
+    ? dataHoje
+    : mesAtual;
+  const dataFinal = data || dataPadrao;
+  let inicio;
+  let fim;
+
+  if (periodoFinal === 'dia' && dataValida(dataFinal)
+    && dataFinal >= '1000-01-01' && dataFinal <= dataHoje) {
+    inicio = dataFinal;
+    const diaSeguinte = new Date(`${dataFinal}T00:00:00.000Z`);
+    diaSeguinte.setUTCDate(diaSeguinte.getUTCDate() + 1);
+    fim = diaSeguinte.toISOString().slice(0, 10);
+  } else if (periodoFinal === 'mes' && /^\d{4}-(0[1-9]|1[0-2])$/.test(dataFinal)
+    && dataFinal >= '1000-01' && dataFinal <= mesAtual) {
+    inicio = `${dataFinal}-01`;
+    const [ano, mes] = dataFinal.split('-').map(Number);
+    fim = new Date(Date.UTC(ano, mes, 1)).toISOString().slice(0, 10);
+  } else {
+    return res.status(400).json({ sucesso: false, mensagem: 'Selecione uma data ou mês válido.' });
+  }
+
+  const inicioPeriodo = `${inicio} 00:00:00`;
+  const fimPeriodo = `${fim} 00:00:00`;
+  try {
+    const [agentes] = await mysqlPool.execute(`
+      SELECT a.id AS agenteId, a.nome AS agenteNome,
+        CASE WHEN LOWER(TRIM(a.cargo)) IN ('atendente', 'agente')
+          THEN 'AGENTE' ELSE UPPER(a.cargo) END AS agenteCargo,
+        COUNT(o.denuncia_id) AS atendidas,
+        COALESCE(SUM(o.resultado = 'RESOLVIDO'), 0) AS resolvidas,
+        ROUND(AVG(CASE WHEN o.encerrada_em IS NOT NULL
+          THEN TIMESTAMPDIFF(SECOND, o.assumida_em, o.encerrada_em) END)) AS tempoMedioSegundos
+      FROM atendentes a
+      LEFT JOIN (
+        SELECT atendente_id, denuncia_id, assumida_em, encerrada_em, resultado
+        FROM atendimentos_operacionais
+        UNION ALL
+        SELECT d.atendente_id, d.id, d.criado_em, d.encerrado_em,
+          CASE WHEN d.status = 'RESOLVIDO' THEN 'RESOLVIDO'
+               WHEN d.status = 'FALSO_ALARME' THEN 'FALSO_ALARME'
+               ELSE NULL END
+        FROM denuncias d
+        WHERE d.atendente_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM atendimentos_operacionais o
+            WHERE o.denuncia_id = d.id
+          )
+      ) o ON o.atendente_id = a.id
+        AND o.assumida_em >= ? AND o.assumida_em < ?
+      GROUP BY a.id, a.nome, a.cargo
+      ORDER BY a.nome
+    `, [inicioPeriodo, fimPeriodo]);
+    const [atendimentos] = await mysqlPool.execute(`
+      SELECT o.id, o.denuncia_id AS denunciaId, o.atendente_id AS agenteId,
+        a.nome AS agenteNome,
+        CASE WHEN LOWER(TRIM(a.cargo)) IN ('atendente', 'agente')
+          THEN 'AGENTE' ELSE UPPER(a.cargo) END AS agenteCargo,
+        d.protocolo, o.resultado, o.estimado,
+        DATE_FORMAT(o.assumida_em, '%Y-%m-%d %H:%i:%s') AS assumidaEm,
+        DATE_FORMAT(o.encerrada_em, '%Y-%m-%d %H:%i:%s') AS encerradaEm,
+        TIMESTAMPDIFF(SECOND, o.assumida_em, COALESCE(o.encerrada_em, CURRENT_TIMESTAMP)) AS duracaoSegundos
+      FROM (
+        SELECT id, denuncia_id, atendente_id, assumida_em, encerrada_em, resultado, 0 AS estimado
+        FROM atendimentos_operacionais
+        UNION ALL
+        SELECT NULL, d.id, d.atendente_id, d.criado_em, d.encerrado_em,
+          CASE WHEN d.status = 'RESOLVIDO' THEN 'RESOLVIDO'
+               WHEN d.status = 'FALSO_ALARME' THEN 'FALSO_ALARME'
+               ELSE NULL END,
+          1
+        FROM denuncias d
+        WHERE d.atendente_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM atendimentos_operacionais o
+            WHERE o.denuncia_id = d.id
+          )
+      ) o
+      JOIN atendentes a ON a.id = o.atendente_id
+      JOIN denuncias d ON d.id = o.denuncia_id
+      WHERE o.assumida_em >= ? AND o.assumida_em < ?
+      ORDER BY a.nome, o.assumida_em DESC, o.denuncia_id DESC
+    `, [inicioPeriodo, fimPeriodo]);
+
+    return res.json({
+      sucesso: true,
+      periodo: periodoFinal,
+      data: dataFinal,
+      agentes: agentes.map((agente) => ({
+        ...agente,
+        agenteId: Number(agente.agenteId),
+        atendidas: Number(agente.atendidas),
+        resolvidas: Number(agente.resolvidas),
+        tempoMedioSegundos: agente.tempoMedioSegundos === null
+          ? null
+          : Number(agente.tempoMedioSegundos),
+      })),
+      atendimentos: atendimentos.map((atendimento) => ({
+        ...atendimento,
+        estimado: Boolean(atendimento.estimado),
+        duracaoSegundos: Number(atendimento.duracaoSegundos),
+      })),
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 app.post('/api/auth/logout', (req, res) => {
   const token = getSessionToken(req.headers.cookie);
   if (token) sessions.delete(token);
@@ -394,7 +545,7 @@ app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next)
   }
 });
 
-app.get('/api/admin/estatisticas', requireAuth, requireAdmin, async (req, res, next) => {
+app.get('/api/admin/estatisticas', requireAuth, requireAdminOrAgent, async (req, res, next) => {
   const periodo = req.query.periodo;
   const data = req.query.data;
   if ((periodo !== undefined && typeof periodo !== 'string')
@@ -601,17 +752,13 @@ io.on('connection', async (socket) => {
     console.error('Erro ao carregar alertas no Socket.IO:', err);
   }
 
-  io.emit('usuarios-conectados', io.engine.clientsCount);
-
-  socket.on('disconnect', () => {
-    io.emit('usuarios-conectados', io.engine.clientsCount);
-  });
 });
 
 async function iniciar() {
   try {
     await garantirTabelaUsuarios();
     await garantirTabelaAtendentes();
+    await garantirTabelaAtendimentosOperacionais();
     await inicializarBanco();
     await testarConexao();
 

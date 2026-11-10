@@ -265,10 +265,9 @@ $('btnSom').addEventListener('click', () => {
 });
 
 /* ---------- eventos em tempo real ---------- */
-function marca() { $('ultimaAtualizacao').textContent = `atualizado às ${new Date().toLocaleTimeString('pt-BR')}`; }
 function chegou(a, repetida) {
   alertas = [a, ...alertas.filter(x => x.id !== a.id)];
-  ultimoNovo = a.id; renderizar(); marca();
+  ultimoNovo = a.id; renderizar();
   aviso(a, repetida); tocar(a.prioridade === 'CRITICA');
   if (String(fichaId) === String(a.id)) desenharFicha();
   if (document.hidden) {
@@ -276,20 +275,18 @@ function chegou(a, repetida) {
     if ('Notification' in window && Notification.permission === 'granted') new Notification(repetida ? 'Acionamento repetido' : 'Novo acionamento de emergência', { body: `${nomeDe(a)} — ${a.tipo || 'Emergência'}` });
   }
 }
-socket.on('connect', () => { $('statusConexao').innerHTML = '<i class="dot on"></i>Online'; marca(); });
+socket.on('connect', () => { $('statusConexao').innerHTML = '<i class="dot on"></i>Online'; });
 socket.on('disconnect', () => { $('statusConexao').innerHTML = '<i class="dot off"></i>Offline'; });
-socket.on('carregar-alertas', d => { alertas = Array.isArray(d) ? d : []; renderizar(); marca(); });
+socket.on('carregar-alertas', d => { alertas = Array.isArray(d) ? d : []; renderizar(); });
 socket.on('novo-alerta', a => chegou(a, false));
 socket.on('novo-acionamento', a => chegou(a, true));
 socket.on('alerta-atualizado', a => {
   const i = alertas.findIndex(x => x.id === a.id);
   if (i !== -1) alertas[i] = a; else alertas.unshift(a);
   if (a.status !== 'ATIVO') document.querySelectorAll(`.toast[data-id="${CSS.escape(String(a.id))}"]`).forEach(t => t.remove());
-  renderizar(); marca();
+  renderizar();
   if (String(fichaId) === String(a.id)) desenharFicha();
 });
-socket.on('usuarios-conectados', n => { $('usuariosConectados').textContent = n; });
-
 /* ---------- interação ---------- */
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');
@@ -326,6 +323,7 @@ fetch('/api/auth/me', { credentials: 'same-origin' }).then(r => {
   return r.json();
 }).then(d => {
   cargoUsuario = d?.usuario?.cargo || null;
+  $('abrirEstatisticasOperacionais').hidden = !['AGENTE', 'ADMINISTRADOR'].includes(cargoUsuario);
   const n = d?.usuario?.nome || d?.usuario?.usuario;
   if (n) { $('nomeUsuario').textContent = n; $('usuarioLogado').hidden = false; }
   renderizar();

@@ -335,11 +335,21 @@ if (adminApp) {
     });
 
     window.policiaApi.get('/api/auth/me').then(({ usuario }) => {
-        if (usuario.cargo !== 'ADMINISTRADOR') {
-            throw new Error('Acesso restrito à administração.');
+        if (!['ADMINISTRADOR', 'AGENTE'].includes(usuario.cargo)) {
+            throw new Error('Acesso restrito à equipe operacional.');
         }
         document.getElementById('admin-identity').textContent = `${usuario.nome} (${usuario.cargo})`;
         adminApp.hidden = false;
-        carregarUsuarios();
+        if (usuario.cargo === 'AGENTE') {
+            document.getElementById('tab-cadastro').hidden = true;
+            document.getElementById('tab-usuarios').hidden = true;
+            document.getElementById('tab-historico').hidden = true;
+            const tabEstatisticas = document.getElementById('tab-estatisticas');
+            tabEstatisticas.setAttribute('aria-expanded', 'true');
+            document.getElementById('panel-estatisticas').hidden = false;
+            carregarEstatisticas();
+        } else {
+            carregarUsuarios();
+        }
     }).catch(() => window.location.replace('Login-adm.html'));
 }
