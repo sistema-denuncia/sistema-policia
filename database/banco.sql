@@ -1,6 +1,6 @@
 USE projeto_denuncia;
 
-CREATE TABLE usuarios (
+CREATE TABLE IF NOT EXISTS usuarios (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(100) NOT NULL,
     cpf VARCHAR(14) NOT NULL UNIQUE,
@@ -10,17 +10,20 @@ CREATE TABLE usuarios (
     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE atendentes (
+CREATE TABLE IF NOT EXISTS atendentes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nome VARCHAR(100) NOT NULL,
     usuario VARCHAR(100) NOT NULL UNIQUE,
-    senha VARCHAR(100) NOT NULL,
+    data_nascimento DATE NULL,
+    genero ENUM('MASCULINO', 'FEMININO') NULL,
+    senha_hash CHAR(128) NOT NULL,
+    senha_salt CHAR(32) NOT NULL,
     cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',
     ativo BOOLEAN DEFAULT TRUE,
     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE denuncias (
+CREATE TABLE IF NOT EXISTS denuncias (
     id INT AUTO_INCREMENT PRIMARY KEY,
     protocolo VARCHAR(30) NOT NULL UNIQUE,
     usuario_id INT NOT NULL,
@@ -54,7 +57,7 @@ CREATE TABLE denuncias (
     FOREIGN KEY (atendente_id) REFERENCES atendentes(id)
 );
 
-CREATE TABLE localizacoes (
+CREATE TABLE IF NOT EXISTS localizacoes (
     id INT AUTO_INCREMENT PRIMARY KEY,
     denuncia_id INT NOT NULL,
     latitude DOUBLE NOT NULL,
@@ -64,3 +67,43 @@ CREATE TABLE localizacoes (
 
     FOREIGN KEY (denuncia_id) REFERENCES denuncias(id)
 );
+
+CREATE TABLE IF NOT EXISTS atendimentos_operacionais (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    denuncia_id INT NOT NULL,
+    atendente_id INT NOT NULL,
+    assumida_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    encerrada_em DATETIME NULL,
+    resultado ENUM('RESOLVIDO', 'FALSO_ALARME', 'TRANSFERIDO') NULL,
+
+    INDEX idx_atendimentos_periodo (assumida_em, atendente_id),
+    INDEX idx_atendimentos_denuncia (denuncia_id, encerrada_em),
+    FOREIGN KEY (denuncia_id) REFERENCES denuncias(id),
+    FOREIGN KEY (atendente_id) REFERENCES atendentes(id)
+);
+
+CREATE TABLE IF NOT EXISTS alertas_policia (
+    id VARCHAR(36) NOT NULL PRIMARY KEY,
+    protocolo VARCHAR(30) NOT NULL UNIQUE,
+    cliente_id VARCHAR(100) NOT NULL,
+    tipo VARCHAR(30) NOT NULL DEFAULT 'EMERGENCIA',
+    status ENUM('ATIVO', 'EM_ATENDIMENTO', 'RESOLVIDO', 'FALSO_ALARME') NOT NULL DEFAULT 'ATIVO',
+    prioridade ENUM('BAIXA', 'MEDIA', 'ALTA', 'CRITICA') NOT NULL DEFAULT 'ALTA',
+    quantidade_acionamentos INT NOT NULL DEFAULT 1,
+    latitude DOUBLE,
+    longitude DOUBLE,
+    acuracia_metros DOUBLE,
+    dispositivo VARCHAR(2000),
+    ip_origem VARCHAR(45),
+    origem VARCHAR(100) NOT NULL DEFAULT 'botao-emergencia-web',
+    observacoes TEXT,
+    criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    encerrado_em TIMESTAMP NULL,
+
+    INDEX idx_alertas_cliente (cliente_id),
+    INDEX idx_alertas_status (status, criado_em),
+    INDEX idx_alertas_tipo   (tipo, criado_em),
+    INDEX idx_alertas_criado (criado_em)
+);
+

@@ -19,3 +19,10 @@ Para iniciar o banco:
    Usuário: root
    Senha: root
    Banco: projeto_denuncia
+
+Depois de iniciar o MySQL, volte à raiz do projeto e execute `npm install` e `npm start`.
+O backend grava e consulta os agentes na tabela `atendentes`. A conexão pode ser ajustada com
+`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD` e `MYSQL_DATABASE` no arquivo `.env`.
+
+A data e a hora de abertura das ocorrências são persistidas em `denuncias.criado_em`. O painel usa
+esse registro para calcular e atualizar os tempos de espera, inclusive após recarregar a página.
