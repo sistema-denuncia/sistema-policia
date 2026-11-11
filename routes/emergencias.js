@@ -62,8 +62,9 @@ function gerarProtocolo() {
 }
 
 router.post('/', emergenciaLimiter, async (req, res, next) => {
-  const { clienteId, tipo, prioridade, dispositivo, localizacao } = req.body || {};
+  const { clienteId, tipo, prioridade, dispositivo, localizacao, rastreamento } = req.body || {};
   const usuarioId = Number(clienteId);
+  const isRastreamento = Boolean(rastreamento);
 
   if (!Number.isSafeInteger(usuarioId) || usuarioId <= 0) {
     return res.status(400).json({
@@ -109,14 +110,26 @@ router.post('/', emergenciaLimiter, async (req, res, next) => {
       if (denunciaAtiva) {
         denunciaId = denunciaAtiva.id;
         duplicado = true;
-        await executar(
-          `UPDATE denuncias
-           SET quantidade_acionamentos = quantidade_acionamentos + 1,
-               dispositivo = ?,
-               ip_origem = ?
-           WHERE id = ?`,
-          [dispositivoFinal, getIp(req), denunciaId]
-        );
+        if (!isRastreamento) {
+          await executar(
+            `UPDATE denuncias
+             SET quantidade_acionamentos = quantidade_acionamentos + 1,
+                 dispositivo = ?,
+                 ip_origem = ?,
+                 atualizado_em = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [dispositivoFinal, getIp(req), denunciaId]
+          );
+        } else {
+          await executar(
+            `UPDATE denuncias
+             SET dispositivo = COALESCE(?, dispositivo),
+                 ip_origem = COALESCE(?, ip_origem),
+                 atualizado_em = CURRENT_TIMESTAMP
+             WHERE id = ?`,
+            [dispositivoFinal, getIp(req), denunciaId]
+          );
+        }
       } else {
         const protocolo = gerarProtocolo();
         const insercao = await executar(
@@ -150,14 +163,15 @@ router.post('/', emergenciaLimiter, async (req, res, next) => {
         if (duplicado) {
           await executar(
             `UPDATE denuncias
-             SET latitude = ?, longitude = ?, acuracia_metros = ?
+             SET latitude = ?, longitude = ?, acuracia_metros = ?,
+                 atualizado_em = CURRENT_TIMESTAMP
              WHERE id = ?`,
             [loc.latitude, loc.longitude, loc.acuraciaMetros, denunciaId]
           );
         }
       }
 
-      return { denunciaId, duplicado };
+      return { denunciaId, duplicado, isRastreamento };
     });
 
     if (resultado.usuarioInexistente) {
@@ -173,15 +187,28 @@ router.post('/', emergenciaLimiter, async (req, res, next) => {
     );
     const alerta = formatarAlerta(row);
 
-    req.app.get('io').emit(resultado.duplicado ? 'novo-acionamento' : 'novo-alerta', alerta);
+    if (isRastreamento && resultado.duplicado) {
+      req.app.get('io').emit('localizacao-atualizada', {
+        id: alerta.id,
+        protocolo: alerta.protocolo,
+        localizacao: alerta.localizacao,
+        atualizadoEm: alerta.atualizadoEm,
+        alerta,
+      });
+    } else {
+      req.app.get('io').emit(resultado.duplicado ? 'novo-acionamento' : 'novo-alerta', alerta);
+    }
 
     return res.status(resultado.duplicado ? 200 : 201).json({
       sucesso: true,
-      mensagem: resultado.duplicado
-        ? 'Este acionamento já foi registrado. A nova tentativa foi contabilizada.'
-        : 'Alerta recebido com sucesso.',
+      mensagem: isRastreamento
+        ? 'Localização de rastreamento atualizada.'
+        : (resultado.duplicado
+            ? 'Este acionamento já foi registrado. A nova tentativa foi contabilizada.'
+            : 'Alerta recebido com sucesso.'),
       id: alerta.id,
       protocolo: alerta.protocolo,
+      rastreamento: isRastreamento,
       ...(resultado.duplicado ? {
         quantidadeAcionamentos: alerta.quantidadeAcionamentos,
         alerta,
@@ -218,15 +245,6 @@ router.get('/', async (req, res, next) => {
     const params = [];
     const filtros = [];
     let sql = SELECT_DENUNCIA;
-
-    if (status) {
-      filtros.push('d.status = ?');
-      params.push(status);
-    }
-    if (prioridade) {
-      filtros.push('d.prioridade = ?');
-      params.push(prioridade);
-    }
 
     const validarData = (valor) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(valor || '')) return false;
@@ -266,6 +284,23 @@ router.get('/', async (req, res, next) => {
 
     const rows = await all(sql, params);
     res.json({ total: rows.length, alertas: rows.map(formatarAlerta) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:id/trajeto', async (req, res, next) => {
+  try {
+    const pontos = await all(
+      `SELECT id, latitude, longitude, acuracia_metros AS acuraciaMetros,
+              CAST(FLOOR(UNIX_TIMESTAMP(registrado_em) * 1000) AS UNSIGNED) AS timestamp_ms,
+              registrado_em AS registradoEm
+       FROM localizacoes
+       WHERE denuncia_id = ?
+       ORDER BY registrado_em ASC, id ASC`,
+      [req.params.id]
+    );
+    res.json({ sucesso: true, trajeto: pontos });
   } catch (err) {
     next(err);
   }
