@@ -11,6 +11,7 @@ const { pool: mysqlPool } = require('./database/mysql');
 const emergenciasRoute = require('./routes/emergencias');
 const usuariosRoute = require('./routes/usuarios');
 const { SELECT_DENUNCIA, formatarAlerta } = require('./lib/alertas');
+const { contemTermoOfensivo, validarSenha } = require('./lib/credential-policy');
 
 const app = express();
 const server = http.createServer(app);
@@ -71,6 +72,20 @@ function requireAuth(req, res, next) {
 function requireAdmin(req, res, next) {
   if (req.usuario.cargo !== 'ADMINISTRADOR') {
     return res.status(403).json({ sucesso: false, mensagem: 'Acesso restrito à administração.' });
+  }
+  next();
+}
+
+function requireAgent(req, res, next) {
+  if (req.usuario.cargo !== 'AGENTE') {
+    return res.status(403).json({ sucesso: false, mensagem: 'Acesso restrito aos agentes.' });
+  }
+  next();
+}
+
+function requireAdminOrAgent(req, res, next) {
+  if (!['ADMINISTRADOR', 'AGENTE'].includes(req.usuario.cargo)) {
+    return res.status(403).json({ sucesso: false, mensagem: 'Acesso restrito à equipe operacional.' });
   }
   next();
 }
@@ -139,6 +154,7 @@ async function garantirTabelaAtendentes() {
       nome VARCHAR(100) NOT NULL,
       usuario VARCHAR(100) NOT NULL UNIQUE,
       data_nascimento DATE NULL,
+      genero ENUM('MASCULINO', 'FEMININO') NULL,
       senha_hash CHAR(128) NULL,
       senha_salt CHAR(32) NULL,
       cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',
@@ -158,10 +174,30 @@ async function garantirTabelaAtendentes() {
   if (!columnNames.has('data_nascimento')) {
     await mysqlPool.query('ALTER TABLE atendentes ADD COLUMN data_nascimento DATE NULL');
   }
+  if (!columnNames.has('genero')) {
+    await mysqlPool.query("ALTER TABLE atendentes ADD COLUMN genero ENUM('MASCULINO', 'FEMININO') NULL");
+  }
   const legacyPasswordColumn = columns.find((column) => column.Field === 'senha');
   if (legacyPasswordColumn && legacyPasswordColumn.Null === 'NO') {
     await mysqlPool.query('ALTER TABLE atendentes MODIFY COLUMN senha VARCHAR(100) NULL');
   }
+}
+
+async function garantirTabelaAtendimentosOperacionais() {
+  await mysqlPool.execute(`
+    CREATE TABLE IF NOT EXISTS atendimentos_operacionais (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      denuncia_id INT NOT NULL,
+      atendente_id INT NOT NULL,
+      assumida_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      encerrada_em DATETIME NULL,
+      resultado ENUM('RESOLVIDO', 'FALSO_ALARME', 'TRANSFERIDO') NULL,
+      INDEX idx_atendimentos_periodo (assumida_em, atendente_id),
+      INDEX idx_atendimentos_denuncia (denuncia_id, encerrada_em),
+      FOREIGN KEY (denuncia_id) REFERENCES denuncias(id),
+      FOREIGN KEY (atendente_id) REFERENCES atendentes(id)
+    )
+  `);
 }
 
 io.use((socket, next) => {
@@ -177,6 +213,9 @@ app.post('/api/auth/supervisor', async (req, res, next) => {
 
   if (!login || !senha) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe usuário e senha.' });
+  }
+  if (contemTermoOfensivo(login) || contemTermoOfensivo(senha)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Login e senha não podem conter termos ofensivos.' });
   }
 
   try {
@@ -213,6 +252,9 @@ app.post('/api/auth/login', async (req, res, next) => {
   const cargoEsperado = req.body?.cargo;
   if (!usuarioLogin || !senha || !['ADMINISTRADOR', 'AGENTE'].includes(cargoEsperado)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe usuário, senha e um cargo válido.' });
+  }
+  if (contemTermoOfensivo(usuarioLogin) || contemTermoOfensivo(senha)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Login e senha não podem conter termos ofensivos.' });
   }
 
   try {
@@ -313,6 +355,126 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ sucesso: true, usuario: req.usuario });
 });
 
+app.get('/api/estatisticas-operacionais', requireAuth, requireAdminOrAgent, async (req, res, next) => {
+  const periodo = req.query.periodo;
+  const data = req.query.data;
+  if ((periodo !== undefined && typeof periodo !== 'string')
+    || (data !== undefined && typeof data !== 'string')) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Informe um período válido.' });
+  }
+
+  const periodoFinal = periodo || 'mes';
+  const hoje = new Date();
+  const dataHoje = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+  const mesAtual = dataHoje.slice(0, 7);
+  const dataPadrao = periodoFinal === 'dia'
+    ? dataHoje
+    : mesAtual;
+  const dataFinal = data || dataPadrao;
+  let inicio;
+  let fim;
+
+  if (periodoFinal === 'dia' && dataValida(dataFinal)
+    && dataFinal >= '1000-01-01' && dataFinal <= dataHoje) {
+    inicio = dataFinal;
+    const diaSeguinte = new Date(`${dataFinal}T00:00:00.000Z`);
+    diaSeguinte.setUTCDate(diaSeguinte.getUTCDate() + 1);
+    fim = diaSeguinte.toISOString().slice(0, 10);
+  } else if (periodoFinal === 'mes' && /^\d{4}-(0[1-9]|1[0-2])$/.test(dataFinal)
+    && dataFinal >= '1000-01' && dataFinal <= mesAtual) {
+    inicio = `${dataFinal}-01`;
+    const [ano, mes] = dataFinal.split('-').map(Number);
+    fim = new Date(Date.UTC(ano, mes, 1)).toISOString().slice(0, 10);
+  } else {
+    return res.status(400).json({ sucesso: false, mensagem: 'Selecione uma data ou mês válido.' });
+  }
+
+  const inicioPeriodo = `${inicio} 00:00:00`;
+  const fimPeriodo = `${fim} 00:00:00`;
+  try {
+    const [agentes] = await mysqlPool.execute(`
+      SELECT a.id AS agenteId, a.nome AS agenteNome,
+        CASE WHEN LOWER(TRIM(a.cargo)) IN ('atendente', 'agente')
+          THEN 'AGENTE' ELSE UPPER(a.cargo) END AS agenteCargo,
+        COUNT(o.denuncia_id) AS atendidas,
+        COALESCE(SUM(o.resultado = 'RESOLVIDO'), 0) AS resolvidas,
+        ROUND(AVG(CASE WHEN o.encerrada_em IS NOT NULL
+          THEN TIMESTAMPDIFF(SECOND, o.assumida_em, o.encerrada_em) END)) AS tempoMedioSegundos
+      FROM atendentes a
+      LEFT JOIN (
+        SELECT atendente_id, denuncia_id, assumida_em, encerrada_em, resultado
+        FROM atendimentos_operacionais
+        UNION ALL
+        SELECT d.atendente_id, d.id, d.criado_em, d.encerrado_em,
+          CASE WHEN d.status = 'RESOLVIDO' THEN 'RESOLVIDO'
+               WHEN d.status = 'FALSO_ALARME' THEN 'FALSO_ALARME'
+               ELSE NULL END
+        FROM denuncias d
+        WHERE d.atendente_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM atendimentos_operacionais o
+            WHERE o.denuncia_id = d.id
+          )
+      ) o ON o.atendente_id = a.id
+        AND o.assumida_em >= ? AND o.assumida_em < ?
+      GROUP BY a.id, a.nome, a.cargo
+      ORDER BY a.nome
+    `, [inicioPeriodo, fimPeriodo]);
+    const [atendimentos] = await mysqlPool.execute(`
+      SELECT o.id, o.denuncia_id AS denunciaId, o.atendente_id AS agenteId,
+        a.nome AS agenteNome,
+        CASE WHEN LOWER(TRIM(a.cargo)) IN ('atendente', 'agente')
+          THEN 'AGENTE' ELSE UPPER(a.cargo) END AS agenteCargo,
+        d.protocolo, o.resultado, o.estimado,
+        DATE_FORMAT(o.assumida_em, '%Y-%m-%d %H:%i:%s') AS assumidaEm,
+        DATE_FORMAT(o.encerrada_em, '%Y-%m-%d %H:%i:%s') AS encerradaEm,
+        TIMESTAMPDIFF(SECOND, o.assumida_em, COALESCE(o.encerrada_em, CURRENT_TIMESTAMP)) AS duracaoSegundos
+      FROM (
+        SELECT id, denuncia_id, atendente_id, assumida_em, encerrada_em, resultado, 0 AS estimado
+        FROM atendimentos_operacionais
+        UNION ALL
+        SELECT NULL, d.id, d.atendente_id, d.criado_em, d.encerrado_em,
+          CASE WHEN d.status = 'RESOLVIDO' THEN 'RESOLVIDO'
+               WHEN d.status = 'FALSO_ALARME' THEN 'FALSO_ALARME'
+               ELSE NULL END,
+          1
+        FROM denuncias d
+        WHERE d.atendente_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM atendimentos_operacionais o
+            WHERE o.denuncia_id = d.id
+          )
+      ) o
+      JOIN atendentes a ON a.id = o.atendente_id
+      JOIN denuncias d ON d.id = o.denuncia_id
+      WHERE o.assumida_em >= ? AND o.assumida_em < ?
+      ORDER BY a.nome, o.assumida_em DESC, o.denuncia_id DESC
+    `, [inicioPeriodo, fimPeriodo]);
+
+    return res.json({
+      sucesso: true,
+      periodo: periodoFinal,
+      data: dataFinal,
+      agentes: agentes.map((agente) => ({
+        ...agente,
+        agenteId: Number(agente.agenteId),
+        atendidas: Number(agente.atendidas),
+        resolvidas: Number(agente.resolvidas),
+        tempoMedioSegundos: agente.tempoMedioSegundos === null
+          ? null
+          : Number(agente.tempoMedioSegundos),
+      })),
+      atendimentos: atendimentos.map((atendimento) => ({
+        ...atendimento,
+        estimado: Boolean(atendimento.estimado),
+        duracaoSegundos: Number(atendimento.duracaoSegundos),
+      })),
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 app.post('/api/auth/logout', (req, res) => {
   const token = getSessionToken(req.headers.cookie);
   if (token) sessions.delete(token);
@@ -364,7 +526,7 @@ app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next)
   try {
     const where = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
     const [atendentes] = await mysqlPool.execute(
-      `SELECT id, nome, usuario, cargo, ativo,
+      `SELECT id, nome, usuario, genero, cargo, ativo,
               DATE_FORMAT(data_nascimento, '%Y-%m-%d') AS dataNascimento, criado_em
        FROM atendentes ${where}
        ORDER BY nome`,
@@ -372,6 +534,7 @@ app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next)
     );
     const usuarios = atendentes.map((row) => ({
       ...usuarioPublico(row),
+      genero: row.genero,
       dataNascimento: row.dataNascimento,
       ativo: Boolean(row.ativo),
       criadoEm: row.criado_em,
@@ -382,7 +545,7 @@ app.get('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next)
   }
 });
 
-app.get('/api/admin/estatisticas', requireAuth, requireAdmin, async (req, res, next) => {
+app.get('/api/admin/estatisticas', requireAuth, requireAdminOrAgent, async (req, res, next) => {
   const periodo = req.query.periodo;
   const data = req.query.data;
   if ((periodo !== undefined && typeof periodo !== 'string')
@@ -486,6 +649,7 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   const nome = typeof req.body?.nome === 'string' ? req.body.nome.trim() : '';
   const usuario = typeof req.body?.usuario === 'string' ? req.body.usuario.trim().toLowerCase() : '';
   const dataNascimento = typeof req.body?.dataNascimento === 'string' ? req.body.dataNascimento : '';
+  const genero = req.body?.genero;
   const cargo = req.body?.cargo;
   const senha = typeof req.body?.senha === 'string' ? req.body.senha : '';
 
@@ -495,26 +659,33 @@ app.post('/api/admin/usuarios', requireAuth, requireAdmin, async (req, res, next
   if (usuario.length < 3 || usuario.length > 32) {
     return res.status(400).json({ sucesso: false, mensagem: 'O usuário deve ter de 3 a 32 caracteres.' });
   }
+  if (contemTermoOfensivo(usuario)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'O usuário não pode conter termos ofensivos.' });
+  }
   if (!dataValida(dataNascimento) || dataNascimento > new Date().toISOString().slice(0, 10)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe uma data de nascimento válida.' });
+  }
+  if (!['MASCULINO', 'FEMININO'].includes(genero)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Selecione um gênero válido.' });
   }
   if (!['ADMINISTRADOR', 'AGENTE'].includes(cargo)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Cargo inválido.' });
   }
-  if (senha.length < 6 || !/[A-Z]/.test(senha) || !/[^A-Za-z0-9]/.test(senha)) {
-    return res.status(400).json({ sucesso: false, mensagem: 'A senha deve ter ao menos 6 caracteres, uma letra maiúscula e um caractere especial.' });
+  const erroSenha = validarSenha(senha);
+  if (erroSenha) {
+    return res.status(400).json({ sucesso: false, mensagem: erroSenha });
   }
 
   try {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(senha, salt, 64);
     const [result] = await mysqlPool.execute(
-      'INSERT INTO atendentes (nome, usuario, data_nascimento, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?, ?)',
-      [nome, usuario, dataNascimento, cargoAtendente(cargo), hash.toString('hex'), salt]
+      'INSERT INTO atendentes (nome, usuario, data_nascimento, genero, cargo, senha_hash, senha_salt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [nome, usuario, dataNascimento, genero, cargoAtendente(cargo), hash.toString('hex'), salt]
     );
     res.status(201).json({
       sucesso: true,
-      usuario: { id: result.insertId, nome, usuario, dataNascimento, cargo },
+      usuario: { id: result.insertId, nome, usuario, dataNascimento, genero, cargo },
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
@@ -581,17 +752,13 @@ io.on('connection', async (socket) => {
     console.error('Erro ao carregar alertas no Socket.IO:', err);
   }
 
-  io.emit('usuarios-conectados', io.engine.clientsCount);
-
-  socket.on('disconnect', () => {
-    io.emit('usuarios-conectados', io.engine.clientsCount);
-  });
 });
 
 async function iniciar() {
   try {
     await garantirTabelaUsuarios();
     await garantirTabelaAtendentes();
+    await garantirTabelaAtendimentosOperacionais();
     await inicializarBanco();
     await testarConexao();
 

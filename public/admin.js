@@ -53,7 +53,7 @@ if (adminApp) {
             if (!usuarios.length) {
                 const row = document.createElement('tr');
                 const cell = document.createElement('td');
-                cell.colSpan = 4;
+                cell.colSpan = 5;
                 cell.textContent = 'Nenhum usuário encontrado com esses filtros.';
                 row.appendChild(cell);
                 usersList.appendChild(row);
@@ -63,7 +63,11 @@ if (adminApp) {
                     const dataNascimento = typeof usuario.dataNascimento === 'string'
                         ? usuario.dataNascimento.split('-').reverse().join('/')
                         : '—';
-                    [usuario.nome, usuario.usuario, usuario.cargo, dataNascimento].forEach((valor) => {
+                    const genero = {
+                        MASCULINO: 'Masculino',
+                        FEMININO: 'Feminino',
+                    }[usuario.genero] || 'Não informado';
+                    [usuario.nome, usuario.usuario, genero, usuario.cargo, dataNascimento].forEach((valor) => {
                         const cell = document.createElement('td');
                         cell.textContent = valor || '—';
                         row.appendChild(cell);
@@ -331,11 +335,21 @@ if (adminApp) {
     });
 
     window.policiaApi.get('/api/auth/me').then(({ usuario }) => {
-        if (usuario.cargo !== 'ADMINISTRADOR') {
-            throw new Error('Acesso restrito à administração.');
+        if (!['ADMINISTRADOR', 'AGENTE'].includes(usuario.cargo)) {
+            throw new Error('Acesso restrito à equipe operacional.');
         }
         document.getElementById('admin-identity').textContent = `${usuario.nome} (${usuario.cargo})`;
         adminApp.hidden = false;
-        carregarUsuarios();
+        if (usuario.cargo === 'AGENTE') {
+            document.getElementById('tab-cadastro').hidden = true;
+            document.getElementById('tab-usuarios').hidden = true;
+            document.getElementById('tab-historico').hidden = true;
+            const tabEstatisticas = document.getElementById('tab-estatisticas');
+            tabEstatisticas.setAttribute('aria-expanded', 'true');
+            document.getElementById('panel-estatisticas').hidden = false;
+            carregarEstatisticas();
+        } else {
+            carregarUsuarios();
+        }
     }).catch(() => window.location.replace('Login-adm.html'));
 }

@@ -33,15 +33,17 @@
             <div class="kpi warn"><span>Em atendimento</span><b id="metricAtendimento">0</b><small>viaturas e operadores em campo</small></div>
             <div class="kpi wait"><span>Maior espera</span><b id="metricEspera">--:--:--</b><small>maior espera entre as ocorrências ativas</small></div>
             <div class="kpi ok"><span>Encerradas</span><b id="metricResolvidas">0</b><small id="metricFalsos">0 falsos alarmes</small></div>
-            <div class="kpi"><span>Operadores online</span><b id="usuariosConectados">0</b><small id="ultimaAtualizacao">sem atualizações</small></div>
         </section>
 
-        <nav class="filters" role="tablist" aria-label="Filtrar ocorrências">
-            <button class="filtro active" data-filtro="ATIVO">Ativas <em id="badgeAtivos">0</em></button>
-            <button class="filtro" data-filtro="EM_ATENDIMENTO">Em atendimento <em id="badgeAtendimento">0</em></button>
-            <button class="filtro" data-filtro="ENCERRADAS">Encerradas <em id="badgeResolvidas">0</em></button>
-            <button class="filtro" data-filtro="TODOS">Todas <em id="totalAlertas">0</em></button>
-        </nav>
+        <div class="filter-row">
+            <nav class="filters" role="tablist" aria-label="Filtrar ocorrências">
+                <button class="filtro active" data-filtro="ATIVO">Ativas <em id="badgeAtivos">0</em></button>
+                <button class="filtro" data-filtro="EM_ATENDIMENTO">Em atendimento <em id="badgeAtendimento">0</em></button>
+                <button class="filtro" data-filtro="ENCERRADAS">Encerradas <em id="badgeResolvidas">0</em></button>
+                <button class="filtro" data-filtro="TODOS">Todas <em id="totalAlertas">0</em></button>
+            </nav>
+            <button class="filtro ops-filter-button" id="abrirEstatisticasOperacionais" type="button" aria-haspopup="dialog" aria-controls="modalEstatisticasOperacionais" hidden>Estatísticas operacionais <span aria-hidden="true">→</span></button>
+        </div>
 
         <section id="alertasList" class="queue" aria-live="polite"></section>
     </main>
@@ -52,6 +54,58 @@
         <div class="sheet"><div id="modalBody"></div></div>
     </div>
 
-    <script src="client.js"></script>
+    <div id="modalEstatisticasOperacionais" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="operational-title">
+        <section class="sheet ops-sheet">
+            <header class="ops-head">
+                <div>
+                    <p class="ops-kicker">DESEMPENHO DA EQUIPE</p>
+                    <h2 id="operational-title">Estatísticas operacionais</h2>
+                </div>
+                <button class="f-close" type="button" data-ops-act="fechar" aria-label="Fechar estatísticas">×</button>
+            </header>
+            <div class="ops-content">
+                <form class="ops-filters" id="operational-filters">
+                    <div>
+                        <label for="operational-period">Consultar por</label>
+                        <select id="operational-period" name="periodo">
+                            <option value="dia">Dia</option>
+                            <option value="mes" selected>Mês</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="operational-date" id="operational-date-label">Mês</label>
+                        <input id="operational-date" name="data" type="month" required>
+                    </div>
+                    <button class="btn primary" type="submit">Aplicar filtro</button>
+                </form>
+                <p class="ops-message" id="operational-message" role="status" aria-live="polite"></p>
+                <section class="ops-section" aria-labelledby="operational-agents-title">
+                    <h3 id="operational-agents-title">Resumo por agente e operador</h3>
+                    <div class="ops-table-wrap">
+                        <table class="ops-table">
+                            <thead><tr><th scope="col">Agente/operador</th><th scope="col">Cargo</th><th scope="col">Atendimentos</th><th scope="col">Resolvidas</th><th scope="col">Tempo médio de atendimento</th></tr></thead>
+                            <tbody id="operational-agents"></tbody>
+                        </table>
+                    </div>
+                </section>
+                <section class="ops-section" aria-labelledby="operational-cases-title">
+                    <h3>
+                        <button class="ops-disclosure" id="operational-cases-toggle" type="button" aria-expanded="false" aria-controls="operational-cases-content">
+                            Atendimentos no período <span aria-hidden="true">▾</span>
+                        </button>
+                    </h3>
+                    <div class="ops-table-wrap" id="operational-cases-content" hidden>
+                        <table class="ops-table ops-details-table">
+                            <thead><tr><th scope="col">Agente/operador</th><th scope="col">Cargo</th><th scope="col">Protocolo</th><th scope="col">Assumida em</th><th scope="col">Encerrada/transferida em</th><th scope="col">Duração</th><th scope="col">Resultado</th></tr></thead>
+                            <tbody id="operational-cases"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </section>
+    </div>
+
+    <script src="client.js?v=operational-stats-access-3"></script>
+    <script src="operational-stats.js?v=4"></script>
 </body>
 </html>

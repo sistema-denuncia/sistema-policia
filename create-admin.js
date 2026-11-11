@@ -12,6 +12,7 @@ require('dotenv').config();
 const crypto = require('crypto');
 const { promisify } = require('util');
 const { pool } = require('./db');
+const { contemTermoOfensivo, validarSenha } = require('./lib/credential-policy');
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -23,6 +24,11 @@ const CARGO   = 'administrador'; // 'atendente' | 'supervisor' | 'administrador'
 // ──────────────────────────────────────────────────────────────────
 
 async function main() {
+  const erroSenha = validarSenha(SENHA);
+  if (contemTermoOfensivo(USUARIO) || contemTermoOfensivo(SENHA) || erroSenha) {
+    throw new Error(erroSenha || 'Login e senha não podem conter termos ofensivos.');
+  }
+
   const salt     = crypto.randomBytes(16).toString('hex');  // 32 chars hex
   const hash     = await scrypt(SENHA, salt, 64);           // 128 chars hex
   const senhaHash = hash.toString('hex');
@@ -58,4 +64,3 @@ main().catch((err) => {
   console.error('\n❌ Erro:', err.message);
   process.exit(1);
 });
-

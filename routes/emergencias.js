@@ -321,6 +321,13 @@ router.get('/:id', async (req, res, next) => {
 });
 
 router.patch('/:id/status', async (req, res, next) => {
+  if (req.usuario.cargo !== 'AGENTE') {
+    return res.status(403).json({
+      sucesso: false,
+      mensagem: 'Somente agentes podem atualizar ocorrências.',
+    });
+  }
+
   const { status, observacoes } = req.body;
 
   if (!STATUS_VALIDOS.includes(status)) {
@@ -333,30 +340,66 @@ router.patch('/:id/status', async (req, res, next) => {
   try {
     const encerrar = ['RESOLVIDO', 'FALSO_ALARME'].includes(status);
 
-    const existente = await get(
-      'SELECT id FROM denuncias WHERE id = ?',
-      [req.params.id]
-    );
-
-    if (!existente) {
-      return res.status(404).json({ sucesso: false, mensagem: 'Alerta não encontrado.' });
-    }
-
     // observacoes ausente = manter o texto atual; string vazia = limpar.
     const temObs = observacoes !== undefined;
     const notas = temObs ? (String(observacoes ?? '').trim().slice(0, 5000) || null) : null;
     const assumindo = status === 'EM_ATENDIMENTO';
 
-    await run(
-      `UPDATE denuncias
-       SET status = ?,
-           observacoes = IF(?, ?, observacoes),
-           atendente_id = IF(?, ?, COALESCE(atendente_id, ?)),
-           encerrado_em = IF(?, COALESCE(encerrado_em, CURRENT_TIMESTAMP), NULL),
-           atualizado_em = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [status, temObs, notas, assumindo, req.usuario.id, req.usuario.id, encerrar, req.params.id]
-    );
+    const atualizada = await transaction(async ({ run: executar, get: buscar }) => {
+      const existente = await buscar(
+        'SELECT id FROM denuncias WHERE id = ? FOR UPDATE',
+        [req.params.id]
+      );
+      if (!existente) return false;
+
+      await executar(
+        `UPDATE denuncias
+         SET status = ?,
+             observacoes = IF(?, ?, observacoes),
+             atendente_id = IF(?, ?, COALESCE(atendente_id, ?)),
+             encerrado_em = IF(?, COALESCE(encerrado_em, CURRENT_TIMESTAMP), NULL),
+             atualizado_em = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [status, temObs, notas, assumindo, req.usuario.id, req.usuario.id, encerrar, req.params.id]
+      );
+
+      const atendimentoAberto = await buscar(
+        `SELECT id, atendente_id FROM atendimentos_operacionais
+         WHERE denuncia_id = ? AND encerrada_em IS NULL
+         ORDER BY id DESC LIMIT 1 FOR UPDATE`,
+        [req.params.id]
+      );
+      const precisaAbrirAtendimento = !atendimentoAberto
+        || Number(atendimentoAberto.atendente_id) !== Number(req.usuario.id);
+      if (assumindo && precisaAbrirAtendimento) {
+        if (atendimentoAberto) {
+          await executar(
+            `UPDATE atendimentos_operacionais
+             SET encerrada_em = CURRENT_TIMESTAMP, resultado = 'TRANSFERIDO'
+             WHERE id = ?`,
+            [atendimentoAberto.id]
+          );
+        }
+        await executar(
+          `INSERT INTO atendimentos_operacionais (denuncia_id, atendente_id)
+           VALUES (?, ?)`,
+          [req.params.id, req.usuario.id]
+        );
+      } else if (encerrar && atendimentoAberto) {
+        await executar(
+          `UPDATE atendimentos_operacionais
+           SET encerrada_em = CURRENT_TIMESTAMP, resultado = ?
+           WHERE id = ?`,
+          [status, atendimentoAberto.id]
+        );
+      }
+
+      return true;
+    });
+
+    if (!atualizada) {
+      return res.status(404).json({ sucesso: false, mensagem: 'Alerta não encontrado.' });
+    }
 
     const alerta = await get(
       `${SELECT_DENUNCIA} WHERE d.id = ?`,

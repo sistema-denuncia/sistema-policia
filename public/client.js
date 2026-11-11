@@ -21,6 +21,7 @@ let marcadorAtual = null, circuloPrecisao = null, linhaTrajeto = null;
 let snapshotRecebido = false, eventosAntesDoSnapshot = [];
 
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
+const podeGerenciar = () => cargoUsuario === 'AGENTE';
 const ts = v => { const t = Date.parse(v); return Number.isNaN(t) ? null : t; };
 const dataHora = v => ts(v) ? new Date(ts(v)).toLocaleString('pt-BR') : '—';
 const hora = v => ts(v) ? new Date(ts(v)).toLocaleTimeString('pt-BR') : '--:--:--';
@@ -77,11 +78,11 @@ function cardHtml(a, novo) {
         <span>${esc(a.protocolo)}</span>
       </div>
     </div>
-    <div class="acoes">
+    ${podeGerenciar() ? `<div class="acoes">
       <button class="btn primary" data-act="abrir" data-id="${esc(a.id)}">Abrir ficha</button>
       ${ativo ? `<button class="btn" data-act="assumir" data-id="${esc(a.id)}">Assumir</button>` : ''}
       ${!fechado ? `<button class="btn good" data-act="encerrar" data-id="${esc(a.id)}">Encerrar</button>` : ''}
-    </div>
+    </div>` : `<div class="acoes"><button class="btn primary" data-act="abrir" data-id="${esc(a.id)}">Abrir ficha</button></div>`}
   </article>`;
 }
 
@@ -160,8 +161,8 @@ function fichaHtml(a, notas) {
         : '<div class="nomap">Localização não enviada. Contate a pessoa ou use o IP de origem como pista.</div>'}
       </div>
       <div class="box"><h3>Observações da equipe</h3>
-        <textarea id="notas" maxlength="5000" placeholder="Registre contato feito, viatura enviada, informações da vítima…">${esc(notas)}</textarea>
-        <div class="loc-row"><button class="btn" data-act="salvar" data-id="${esc(a.id)}">Salvar observações</button></div>
+        <textarea id="notas" maxlength="5000" placeholder="Registre contato feito, viatura enviada, informações da vítima…" ${podeGerenciar() ? '' : 'readonly'}>${esc(notas)}</textarea>
+        ${podeGerenciar() ? `<div class="loc-row"><button class="btn" data-act="salvar" data-id="${esc(a.id)}">Salvar observações</button></div>` : ''}
       </div>
     </div>
     <div class="col">
@@ -177,11 +178,11 @@ function fichaHtml(a, notas) {
       </dl></div>
     </div>
   </div>
-  <div class="f-actions">
+  ${podeGerenciar() ? `<div class="f-actions">
     ${a.status === 'ATIVO' ? `<button class="btn primary" data-act="assumir" data-id="${esc(a.id)}">Assumir ocorrência</button>` : ''}
     <span class="sp"></span>
     ${!fechado ? `<button class="btn muted" data-act="falso" data-id="${esc(a.id)}">Marcar falso alarme</button><button class="btn good" data-act="encerrar" data-id="${esc(a.id)}">Encerrar ocorrência</button>` : ''}
-  </div>`;
+  </div>` : ''}`;
 }
 
 function desenharFicha() {
@@ -294,10 +295,19 @@ function aviso(a, repetida) {
   t.innerHTML = `<button class="x" data-act="aviso-x" aria-label="Dispensar aviso">×</button>
     <h4>${repetida ? `Acionamento repetido (${a.quantidadeAcionamentos}×) · ` : 'Novo acionamento · '}Prioridade ${rotulo.toLowerCase()}</h4>
     <p>${esc(nomeDe(a))}${a.solicitante?.idade != null ? `, ${a.solicitante.idade} anos` : ''}<small>${esc(a.tipo || 'Emergência')} · ${pos(a) ? `local ${precisao(a)}` : 'sem localização'}${a.solicitante?.idade < 18 ? ' · menor de idade' : ''}</small></p>
-    <div class="acoes"><button class="btn primary" data-act="abrir" data-id="${esc(a.id)}">Abrir ficha</button>${a.status === 'ATIVO' ? `<button class="btn" data-act="assumir" data-id="${esc(a.id)}">Assumir</button>` : ''}</div>`;
+    ${podeGerenciar() ? `<div class="acoes"><button class="btn primary" data-act="abrir" data-id="${esc(a.id)}">Abrir ficha</button>${a.status === 'ATIVO' ? `<button class="btn" data-act="assumir" data-id="${esc(a.id)}">Assumir</button>` : ''}</div>` : `<div class="acoes"><button class="btn primary" data-act="abrir" data-id="${esc(a.id)}">Abrir ficha</button></div>`}`;
   const box = $('toasts'); box.prepend(t);
   while (box.children.length > 4) box.lastElementChild.remove();
   if (a.prioridade !== 'CRITICA' && a.prioridade !== 'ALTA') setTimeout(() => t.remove(), 20000);
+}
+
+function atualizarAcoesAvisos() {
+  document.querySelectorAll('.toast').forEach(toast => {
+    const alerta = alertas.find(a => String(a.id) === toast.dataset.id);
+    const acoes = toast.querySelector('.acoes');
+    if (!alerta || !acoes) return;
+    acoes.innerHTML = `<button class="btn primary" data-act="abrir" data-id="${esc(alerta.id)}">Abrir ficha</button>${podeGerenciar() && alerta.status === 'ATIVO' ? `<button class="btn" data-act="assumir" data-id="${esc(alerta.id)}">Assumir</button>` : ''}`;
+  });
 }
 
 /* ---------- som ---------- */
@@ -329,7 +339,6 @@ $('btnSom').addEventListener('click', () => {
 });
 
 /* ---------- eventos em tempo real ---------- */
-function marca() { $('ultimaAtualizacao').textContent = `atualizado às ${new Date().toLocaleTimeString('pt-BR')}`; }
 function chegou(a, repetida) {
   alertas = [a, ...alertas.filter(x => String(x.id) !== String(a.id))];
   ultimoNovo = a.id; renderizar(); marca();
@@ -417,10 +426,10 @@ document.addEventListener('click', e => {
   const id = b.dataset.id;
   switch (b.dataset.act) {
     case 'abrir': abrirFicha(id); break;
-    case 'assumir': mudarStatus(id, 'EM_ATENDIMENTO', String(fichaId) === String(id)); break;
-    case 'encerrar': mudarStatus(id, 'RESOLVIDO', String(fichaId) === String(id)); break;
-    case 'falso': if (confirm('Marcar esta ocorrência como falso alarme?')) mudarStatus(id, 'FALSO_ALARME', true); break;
-    case 'salvar': { const a = alertas.find(x => String(x.id) === String(id)); if (a) mudarStatus(id, a.status, true); break; }
+    case 'assumir': if (podeGerenciar()) mudarStatus(id, 'EM_ATENDIMENTO', String(fichaId) === String(id)); break;
+    case 'encerrar': if (podeGerenciar()) mudarStatus(id, 'RESOLVIDO', String(fichaId) === String(id)); break;
+    case 'falso': if (podeGerenciar() && confirm('Marcar esta ocorrência como falso alarme?')) mudarStatus(id, 'FALSO_ALARME', true); break;
+    case 'salvar': { const a = alertas.find(x => String(x.id) === String(id)); if (podeGerenciar() && a) mudarStatus(id, a.status, true); break; }
     case 'copiar': navigator.clipboard?.writeText(b.dataset.coords).then(() => { b.textContent = 'Copiado'; setTimeout(() => { b.textContent = 'Copiar coordenadas'; }, 1500); }); break;
     case 'fechar': fecharFicha(); break;
     case 'aviso-x': b.closest('.toast').remove(); break;
@@ -437,9 +446,17 @@ document.querySelectorAll('.filtro').forEach(b => b.addEventListener('click', ()
   filtro = b.dataset.filtro; renderizar();
 }));
 
-fetch('/api/auth/me', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null).then(d => {
+fetch('/api/auth/me', { credentials: 'same-origin' }).then(r => {
+  if (!r.ok) throw new Error('Não foi possível identificar o usuário autenticado.');
+  return r.json();
+}).then(d => {
+  cargoUsuario = d?.usuario?.cargo || null;
+  $('abrirEstatisticasOperacionais').hidden = !['AGENTE', 'ADMINISTRADOR'].includes(cargoUsuario);
   const n = d?.usuario?.nome || d?.usuario?.usuario;
   if (n) { $('nomeUsuario').textContent = n; $('usuarioLogado').hidden = false; }
-}).catch(() => {});
+  renderizar();
+  atualizarAcoesAvisos();
+  if (fichaId !== null) desenharFicha();
+}).catch(error => console.error('Erro ao carregar o perfil do operador:', error));
 if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {});
 rotuloSom(); renderizar();

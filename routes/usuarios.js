@@ -3,6 +3,7 @@ const { promisify } = require('util');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { get, run } = require('../db');
+const { contemTermoOfensivo, validarSenha } = require('../lib/credential-policy');
 
 const scrypt = promisify(crypto.scrypt);
 const router = express.Router();
@@ -58,10 +59,14 @@ router.post('/', async (req, res, next) => {
   if (emailFinal.length > 150 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailFinal)) {
     return res.status(400).json({ sucesso: false, mensagem: 'E-mail inválido.' });
   }
-  if (typeof senha !== 'string' || senha.length < 6 || senha.length > 128) {
+  if (contemTermoOfensivo(emailFinal)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'O login não pode conter termos ofensivos.' });
+  }
+  const erroSenha = validarSenha(senha);
+  if (erroSenha) {
     return res.status(400).json({
       sucesso: false,
-      mensagem: 'A senha deve ter entre 6 e 128 caracteres.',
+      mensagem: erroSenha,
     });
   }
 
@@ -99,6 +104,9 @@ router.post('/login', loginLimiter, async (req, res, next) => {
 
   if (!email || typeof senha !== 'string') {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe e-mail e senha.' });
+  }
+  if (contemTermoOfensivo(email) || contemTermoOfensivo(senha)) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Login e senha não podem conter termos ofensivos.' });
   }
 
   try {

@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS atendentes (
     nome VARCHAR(100) NOT NULL,
     usuario VARCHAR(100) NOT NULL UNIQUE,
     data_nascimento DATE NULL,
+    genero ENUM('MASCULINO', 'FEMININO') NULL,
     senha_hash CHAR(128) NOT NULL,
     senha_salt CHAR(32) NOT NULL,
     cargo ENUM('atendente', 'supervisor', 'administrador') DEFAULT 'atendente',
@@ -65,6 +66,20 @@ CREATE TABLE IF NOT EXISTS localizacoes (
     registrado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (denuncia_id) REFERENCES denuncias(id)
+);
+
+CREATE TABLE IF NOT EXISTS atendimentos_operacionais (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    denuncia_id INT NOT NULL,
+    atendente_id INT NOT NULL,
+    assumida_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    encerrada_em DATETIME NULL,
+    resultado ENUM('RESOLVIDO', 'FALSO_ALARME', 'TRANSFERIDO') NULL,
+
+    INDEX idx_atendimentos_periodo (assumida_em, atendente_id),
+    INDEX idx_atendimentos_denuncia (denuncia_id, encerrada_em),
+    FOREIGN KEY (denuncia_id) REFERENCES denuncias(id),
+    FOREIGN KEY (atendente_id) REFERENCES atendentes(id)
 );
 
 CREATE TABLE IF NOT EXISTS alertas_policia (
