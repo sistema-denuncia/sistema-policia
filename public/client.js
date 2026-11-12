@@ -167,7 +167,7 @@ function fichaHtml(a, notas) {
     </div>
     <div class="col">
       <div class="box"><h3>Quem pediu ajuda</h3><dl>
-        ${linha('Nome', esc(s.nome || '—'))}${linha('Idade', s.idade != null ? `${s.idade} anos (${esc((s.dataNascimento || '').split('-').reverse().join('/'))})` : '—')}
+        ${linha('Nome', esc(s.nome || '—'))}${linha('Gênero', esc(({ FEMININO: 'Feminino', MASCULINO: 'Masculino', PREFIRO_NAO_INFORMAR: 'Prefiro não informar' })[s.genero] || 'Não informado'))}${linha('Idade', s.idade != null ? `${s.idade} anos (${esc((s.dataNascimento || '').split('-').reverse().join('/'))})` : '—')}
         ${linha('CPF', esc(cpfFmt(s.cpf)))}${linha('E-mail', esc(s.email || '—'))}${linha('ID do cliente', esc(a.clienteId))}${linha('Cadastrado em', esc(dataHora(s.cadastradoEm).split(',')[0]))}
         ${linha('Ocorrências anteriores', h.total || 0)}${linha('Falsos alarmes anteriores', h.falsosAlarmes || 0)}
       </dl></div>
