@@ -1,5 +1,14 @@
-const socket = io();
-socket.on('connect_error', e => { if (e.message === 'Autenticação necessária.') location.replace('primeira-tela-login.html'); });
+const socket = io({
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  timeout: 10000
+});
+socket.on('connect_error', e => {
+  $('statusConexao').innerHTML = '<i class="dot off"></i>Reconectando';
+  if (e.message === 'Autenticação necessária.') location.replace('primeira-tela-login.html');
+});
 
 const $ = id => document.getElementById(id);
 const BASE = 'Central Operacional';
@@ -7,7 +16,9 @@ const PRIO = { CRITICA: ['critica', 'Crítica', 4], ALTA: ['alta', 'Alta', 3], M
 const STATUS = { ATIVO: 'Ativo', EM_ATENDIMENTO: 'Em atendimento', RESOLVIDO: 'Resolvido', FALSO_ALARME: 'Falso alarme' };
 const ENCERRADO = s => s === 'RESOLVIDO' || s === 'FALSO_ALARME';
 
-let alertas = [], filtro = 'ATIVO', fichaId = null, mapa = null, notasSujas = false, pendentes = 0, cargoUsuario = null;
+let alertas = [], filtro = 'ATIVO', fichaId = null, mapa = null, notasSujas = false, pendentes = 0;
+let marcadorAtual = null, circuloPrecisao = null, linhaTrajeto = null;
+let snapshotRecebido = false, eventosAntesDoSnapshot = [];
 
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c]));
 const podeGerenciar = () => cargoUsuario === 'AGENTE';
@@ -139,10 +150,14 @@ function fichaHtml(a, notas) {
   </div>
   <div class="f-body">
     <div class="col">
-      <div class="box"><h3>Onde a pessoa está</h3>
+      <div class="box"><h3>Onde a pessoa está (Rastreamento em tempo real)</h3>
         ${pos(a) ? `<div id="mapaOcorrencia" class="mapa" aria-label="Mapa da localização"></div>
-        <dl style="margin-top:12px">${linha('Coordenadas', `${(+L.latitude).toFixed(6)}, ${(+L.longitude).toFixed(6)}`)}${linha('Precisão do GPS', precisao(a))}${linha('Última posição', `<span class="${velha ? 'stale' : ''}">${esc(hora(L.registradoEm))} (${ha(L.registradoEm)})${velha ? ' · desatualizada' : ''}</span>`)}</dl>
-        <div class="loc-row"><a class="btn primary" href="${rota}" target="_blank" rel="noopener">Traçar rota</a><button class="btn" data-act="copiar" data-coords="${L.latitude}, ${L.longitude}">Copiar coordenadas</button></div>`
+        <dl style="margin-top:12px">
+          ${linha('Coordenadas', `<span id="fichaCoords">${(+L.latitude).toFixed(6)}, ${(+L.longitude).toFixed(6)}</span>`)}
+          ${linha('Precisão do GPS', `<span id="fichaPrecisao">${precisao(a)}</span>`)}
+          ${linha('Última posição', `<span id="fichaUltimaPos"><span class="${velha ? 'stale' : 'live-pulse'}">${esc(hora(L.registradoEm))} (${ha(L.registradoEm)})${velha ? ' · desatualizada' : ''}</span></span>`)}
+        </dl>
+        <div class="loc-row"><a id="fichaRotaBtn" class="btn primary" href="${rota}" target="_blank" rel="noopener">Traçar rota</a><button id="fichaCopiarBtn" class="btn" data-act="copiar" data-coords="${L.latitude}, ${L.longitude}">Copiar coordenadas</button></div>`
         : '<div class="nomap">Localização não enviada. Contate a pessoa ou use o IP de origem como pista.</div>'}
       </div>
       <div class="box"><h3>Observações da equipe</h3>
@@ -152,7 +167,7 @@ function fichaHtml(a, notas) {
     </div>
     <div class="col">
       <div class="box"><h3>Quem pediu ajuda</h3><dl>
-        ${linha('Nome', esc(s.nome || '—'))}${linha('Idade', s.idade != null ? `${s.idade} anos (${esc((s.dataNascimento || '').split('-').reverse().join('/'))})` : '—')}
+        ${linha('Nome', esc(s.nome || '—'))}${linha('Gênero', esc(({ FEMININO: 'Feminino', MASCULINO: 'Masculino', PREFIRO_NAO_INFORMAR: 'Prefiro não informar' })[s.genero] || 'Não informado'))}${linha('Idade', s.idade != null ? `${s.idade} anos (${esc((s.dataNascimento || '').split('-').reverse().join('/'))})` : '—')}
         ${linha('CPF', esc(cpfFmt(s.cpf)))}${linha('E-mail', esc(s.email || '—'))}${linha('ID do cliente', esc(a.clienteId))}${linha('Cadastrado em', esc(dataHora(s.cadastradoEm).split(',')[0]))}
         ${linha('Ocorrências anteriores', h.total || 0)}${linha('Falsos alarmes anteriores', h.falsosAlarmes || 0)}
       </dl></div>
@@ -176,18 +191,74 @@ function desenharFicha() {
   const atual = $('notas');
   const notas = atual && notasSujas ? atual.value : (a.observacoes || '');
   if (mapa) { mapa.remove(); mapa = null; }
+  marcadorAtual = null;
+  circuloPrecisao = null;
+  linhaTrajeto = null;
   $('modalBody').innerHTML = fichaHtml(a, notas);
   if (pos(a) && window.L) {
     const p = [+a.localizacao.latitude, +a.localizacao.longitude];
     mapa = L.map('mapaOcorrencia').setView(p, 17);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(mapa);
     const r = +a.localizacao.acuraciaMetros;
-    if (r > 0) L.circle(p, { radius: r, color: '#ff4d5a', weight: 1, fillOpacity: .12 }).addTo(mapa);
-    L.marker(p).addTo(mapa);
+    if (r > 0) circuloPrecisao = L.circle(p, { radius: r, color: '#ff4d5a', weight: 1, fillOpacity: .12 }).addTo(mapa);
+    marcadorAtual = L.marker(p).addTo(mapa);
+    linhaTrajeto = L.polyline([], { color: '#ff4d5a', weight: 4, opacity: 0.85, dashArray: '6, 8' }).addTo(mapa);
+
+    fetch(`/api/emergencia/${encodeURIComponent(a.id)}/trajeto`, { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.sucesso && Array.isArray(d.trajeto) && linhaTrajeto && String(fichaId) === String(a.id)) {
+          const pts = d.trajeto.map(pt => [+pt.latitude, +pt.longitude]);
+          linhaTrajeto.setLatLngs(pts);
+        }
+      })
+      .catch(() => {});
+
     setTimeout(() => mapa && mapa.invalidateSize(), 0);
   }
   tique();
 }
+
+function atualizarLocalizacaoNaTela(a) {
+  if (!pos(a)) return;
+  const p = [+a.localizacao.latitude, +a.localizacao.longitude];
+  const r = +a.localizacao.acuraciaMetros || 0;
+
+  if (String(fichaId) === String(a.id)) {
+    if (mapa && marcadorAtual) {
+      marcadorAtual.setLatLng(p);
+      if (circuloPrecisao) {
+        circuloPrecisao.setLatLng(p);
+        circuloPrecisao.setRadius(r);
+      }
+      if (linhaTrajeto) {
+        linhaTrajeto.addLatLng(p);
+      }
+      mapa.panTo(p, { animate: true, duration: 0.8 });
+    } else {
+      desenharFicha();
+      return;
+    }
+
+    const elCoords = $('fichaCoords');
+    if (elCoords) elCoords.textContent = `${p[0].toFixed(6)}, ${p[1].toFixed(6)}`;
+
+    const elPrecisao = $('fichaPrecisao');
+    if (elPrecisao) elPrecisao.textContent = precisao(a);
+
+    const elUltimaPos = $('fichaUltimaPos');
+    if (elUltimaPos) {
+      elUltimaPos.innerHTML = `<span class="live-pulse">🟢 ${esc(hora(a.localizacao.registradoEm))} (agora)</span>`;
+    }
+
+    const elRota = $('fichaRotaBtn');
+    if (elRota) elRota.href = `https://www.google.com/maps/dir/?api=1&destination=${p[0]},${p[1]}`;
+
+    const elCopiar = $('fichaCopiarBtn');
+    if (elCopiar) elCopiar.dataset.coords = `${p[0]}, ${p[1]}`;
+  }
+}
+
 function abrirFicha(id) {
   fichaId = id; notasSujas = false;
   $('modalAlerta').classList.remove('hidden'); $('modalAlerta').setAttribute('aria-hidden', 'false');
@@ -196,6 +267,9 @@ function abrirFicha(id) {
 }
 function fecharFicha() {
   if (mapa) { mapa.remove(); mapa = null; }
+  marcadorAtual = null;
+  circuloPrecisao = null;
+  linhaTrajeto = null;
   fichaId = null; notasSujas = false;
   $('modalAlerta').classList.add('hidden'); $('modalAlerta').setAttribute('aria-hidden', 'true');
 }
@@ -266,27 +340,81 @@ $('btnSom').addEventListener('click', () => {
 
 /* ---------- eventos em tempo real ---------- */
 function chegou(a, repetida) {
-  alertas = [a, ...alertas.filter(x => x.id !== a.id)];
-  ultimoNovo = a.id; renderizar();
+  alertas = [a, ...alertas.filter(x => String(x.id) !== String(a.id))];
+  ultimoNovo = a.id; renderizar(); marca();
   aviso(a, repetida); tocar(a.prioridade === 'CRITICA');
-  if (String(fichaId) === String(a.id)) desenharFicha();
+  if (String(fichaId) === String(a.id)) {
+    if (mapa && marcadorAtual) {
+      atualizarLocalizacaoNaTela(a);
+    } else {
+      desenharFicha();
+    }
+  }
   if (document.hidden) {
     pendentes++;
     if ('Notification' in window && Notification.permission === 'granted') new Notification(repetida ? 'Acionamento repetido' : 'Novo acionamento de emergência', { body: `${nomeDe(a)} — ${a.tipo || 'Emergência'}` });
   }
 }
-socket.on('connect', () => { $('statusConexao').innerHTML = '<i class="dot on"></i>Online'; });
-socket.on('disconnect', () => { $('statusConexao').innerHTML = '<i class="dot off"></i>Offline'; });
-socket.on('carregar-alertas', d => { alertas = Array.isArray(d) ? d : []; renderizar(); });
-socket.on('novo-alerta', a => chegou(a, false));
-socket.on('novo-acionamento', a => chegou(a, true));
-socket.on('alerta-atualizado', a => {
-  const i = alertas.findIndex(x => x.id === a.id);
+function aplicarEventoSocket(evento, dado) {
+  if (!dado || typeof dado !== 'object') return;
+
+  if (evento === 'novo-alerta' || evento === 'novo-acionamento') {
+    chegou(dado, evento === 'novo-acionamento');
+    return;
+  }
+
+  const a = evento === 'localizacao-atualizada' ? (dado.alerta || dado) : dado;
+  if (a.id === undefined || a.id === null) return;
+
+  const i = alertas.findIndex(x => String(x.id) === String(a.id));
   if (i !== -1) alertas[i] = a; else alertas.unshift(a);
-  if (a.status !== 'ATIVO') document.querySelectorAll(`.toast[data-id="${CSS.escape(String(a.id))}"]`).forEach(t => t.remove());
-  renderizar();
-  if (String(fichaId) === String(a.id)) desenharFicha();
+  if (evento === 'alerta-atualizado' && a.status !== 'ATIVO') {
+    document.querySelectorAll(`.toast[data-id="${CSS.escape(String(a.id))}"]`).forEach(t => t.remove());
+  }
+  renderizar(); marca();
+  if (String(fichaId) === String(a.id)) {
+    if (evento === 'localizacao-atualizada') {
+      atualizarLocalizacaoNaTela(a);
+    } else if (mapa && marcadorAtual) {
+      atualizarLocalizacaoNaTela(a);
+    } else {
+      desenharFicha();
+    }
+  }
+}
+
+function receberEventoSocket(evento, dado) {
+  if (!snapshotRecebido) {
+    eventosAntesDoSnapshot.push([evento, dado]);
+    return;
+  }
+  aplicarEventoSocket(evento, dado);
+}
+
+socket.on('connect', () => {
+  snapshotRecebido = false;
+  eventosAntesDoSnapshot = [];
+  $('statusConexao').innerHTML = '<i class="dot on"></i>Online';
+  marca();
 });
+socket.on('disconnect', () => {
+  snapshotRecebido = false;
+  $('statusConexao').innerHTML = '<i class="dot off"></i>Reconectando';
+});
+socket.on('carregar-alertas', d => {
+  alertas = Array.isArray(d) ? d : [];
+  snapshotRecebido = true;
+  renderizar(); marca();
+  const eventosPendentes = eventosAntesDoSnapshot;
+  eventosAntesDoSnapshot = [];
+  eventosPendentes.forEach(([evento, dado]) => aplicarEventoSocket(evento, dado));
+});
+socket.on('novo-alerta', a => receberEventoSocket('novo-alerta', a));
+socket.on('novo-acionamento', a => receberEventoSocket('novo-acionamento', a));
+socket.on('localizacao-atualizada', data => receberEventoSocket('localizacao-atualizada', data));
+socket.on('alerta-atualizado', a => receberEventoSocket('alerta-atualizado', a));
+socket.on('usuarios-conectados', n => { $('usuariosConectados').textContent = n; });
+
 /* ---------- interação ---------- */
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-act]');

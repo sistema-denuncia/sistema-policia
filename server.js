@@ -139,12 +139,20 @@ async function garantirTabelaUsuarios() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       nome VARCHAR(100) NOT NULL,
       cpf VARCHAR(14) NOT NULL UNIQUE,
+      genero ENUM('FEMININO', 'MASCULINO', 'PREFIRO_NAO_INFORMAR') NULL,
       data_nascimento DATE NOT NULL,
       email VARCHAR(150) NOT NULL UNIQUE,
       senha VARCHAR(255) NOT NULL,
       criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  const [columns] = await mysqlPool.query('SHOW COLUMNS FROM usuarios');
+  if (!columns.some((column) => column.Field === 'genero')) {
+    await mysqlPool.query(
+      "ALTER TABLE usuarios ADD COLUMN genero ENUM('FEMININO', 'MASCULINO', 'PREFIRO_NAO_INFORMAR') NULL AFTER cpf"
+    );
+  }
 }
 
 async function garantirTabelaAtendentes() {
@@ -288,6 +296,17 @@ app.post('/api/auth/login', async (req, res, next) => {
 app.post('/api/usuarios', requireApiKey, async (req, res, next) => {
   const nome = typeof req.body?.nome === 'string' ? req.body.nome.trim() : '';
   const cpf = typeof req.body?.cpf === 'string' ? req.body.cpf.replace(/\D/g, '') : '';
+  const generoRecebido = typeof req.body?.genero === 'string' ? req.body.genero : '';
+  const generoNormalizado = generoRecebido.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase();
+  const generosPermitidos = new Map([
+    ['feminino', 'FEMININO'],
+    ['masculino', 'MASCULINO'],
+    ['prefironaoinformar', 'PREFIRO_NAO_INFORMAR'],
+  ]);
+  const genero = generosPermitidos.get(generoNormalizado);
   const dataNascimento = req.body?.dataNascimento;
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const senha = req.body?.senha;
@@ -297,6 +316,9 @@ app.post('/api/usuarios', requireApiKey, async (req, res, next) => {
   }
   if (!/^\d{11}$/.test(cpf)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe um CPF válido.' });
+  }
+  if (!genero) {
+    return res.status(400).json({ sucesso: false, mensagem: 'Selecione um gênero válido.' });
   }
   if (!dataValida(dataNascimento)) {
     return res.status(400).json({ sucesso: false, mensagem: 'Informe uma data de nascimento válida.' });
@@ -311,12 +333,12 @@ app.post('/api/usuarios', requireApiKey, async (req, res, next) => {
   try {
     const senhaHash = await criarHashSenha(senha);
     const [result] = await mysqlPool.execute(
-      'INSERT INTO usuarios (nome, cpf, data_nascimento, email, senha) VALUES (?, ?, ?, ?, ?)',
-      [nome, cpf, dataNascimento, email, senhaHash]
+      'INSERT INTO usuarios (nome, cpf, genero, data_nascimento, email, senha) VALUES (?, ?, ?, ?, ?, ?)',
+      [nome, cpf, genero, dataNascimento, email, senhaHash]
     );
     return res.status(201).json({
       sucesso: true,
-      usuario: { id: result.insertId, nome, email },
+      usuario: { id: result.insertId, nome, email, genero },
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
