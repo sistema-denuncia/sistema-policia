@@ -29,6 +29,8 @@ cada posição enviada também é registrada em `localizacoes`.
 O serviço do botão cria contas usando `POST /api/usuarios` e autentica usuários
 em `POST /api/usuarios/login`. Essas rotas, assim como o acionamento, exigem a
 chave de integração `X-API-Key`. As senhas novas são armazenadas usando scrypt.
+O cadastro também persiste o gênero do solicitante em `usuarios`; a informação
+é incluída na notificação de emergência enviada ao painel.
 
 ## Execução local
 
